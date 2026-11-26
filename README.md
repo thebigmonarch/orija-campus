@@ -23,10 +23,15 @@ Asks, hostels, room requests and campus bids always open in Orija Campus.
 
 ## The campus web app
 
-Put the Flutter web build (`build/web`, or FlutterFlow's web export) in the
-repo root. `vercel.json` serves `index.html` for app routes and leaves
-`/go/...` to the router.
+FlutterFlow pushes the app's code to the `flutterflow` branch (Settings →
+Integrations → GitHub). On each Vercel deploy of `main`, `build.sh` downloads
+Flutter, takes the latest code from that branch, builds the web app into
+`public/`, and Vercel serves it with the router alongside. `vercel.json` serves
+`index.html` for app pages and leaves `/go/...` to the router.
 
+**After pushing from FlutterFlow**, redeploy in Vercel (Deployments → latest →
+Redeploy) so the site picks up the new app code. Pushes to the `flutterflow`
+branch don't deploy on their own.
 ## Settings (optional)
 
 Environment variables in Vercel, all with working defaults:

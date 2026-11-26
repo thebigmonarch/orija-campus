@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "dnf install -y unzip xz which tar gzip >/dev/null 2>&1 || true",
+  "buildCommand": "bash build.sh",
+  "outputDirectory": "public",
+  "git": {
+    "deploymentEnabled": { "flutterflow": false }
+  },
   "rewrites": [
     { "source": "/go/:path*", "destination": "/api/go?path=:path*" },
     { "source": "/((?!api/|go/|assets/|canvaskit/|icons/|.*\\.[a-zA-Z0-9]+$).*)", "destination": "/index.html" }
@@ -8,6 +14,10 @@
     {
       "source": "/api/(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
+    },
+    {
+      "source": "/(main.dart.js|flutter_bootstrap.js|flutter_service_worker.js|index.html|version.json)",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }
   ]
 }
