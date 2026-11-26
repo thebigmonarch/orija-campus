@@ -1,0 +1,6 @@
+{
+  "name": "orija-campus",
+  "private": true,
+  "description": "Orija Campus web app and share-link router",
+  "engines": { "node": ">=18" }
+}
