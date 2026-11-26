@@ -132,13 +132,17 @@ module.exports = async (req, res) => {
 
   const app = fromMain && t.open_in_main ? 'main' : t.app;
   const appName = app === 'campus' ? 'Orija Campus' : 'Orija';
+  // Pass the sharer's referral code on to the app.
+  const ref = url.searchParams.get('ref');
+  let target = APPS[app] + appPath(t);
+  if (ref) target += (target.includes('?') ? '&' : '?') + 'ref=' + encodeURIComponent(ref);
   res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
   return res.end(page({
     title: t.title || appName,
     description: t.description || '',
     image: t.image,
     url: self,
-    target: APPS[app] + appPath(t),
+    target,
     appName,
   }));
 };
