@@ -24,6 +24,8 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -885,8 +887,15 @@ class _OrijaTradeFairBookingState extends State<OrijaTradeFairBooking> {
             hasStore ? 'Done' : 'Add a name, a logo and what you sell.',
             done: hasStore,
             current: verified && !hasStore,
-            action: 'Set up storefront',
-            onTap: () => context.pushNamed('SellPage')),
+            action: 'Set up storefront', onTap: () async {
+          // Remember this fair: once the store is created, storefront
+          // setup brings the student straight back here to book.
+          try {
+            final p = await SharedPreferences.getInstance();
+            await p.setString('orija_after_store_setup', _fairId);
+          } catch (_) {}
+          if (mounted) context.pushNamed('SellPage');
+        }),
         step(3, 'Book your spot', 'Opens once the steps above are done.',
             done: false, current: false),
         TextButton(

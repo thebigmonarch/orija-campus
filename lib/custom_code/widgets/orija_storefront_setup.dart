@@ -24,6 +24,8 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
@@ -820,7 +822,22 @@ class _OrijaStorefrontSetupState extends State<OrijaStorefrontSetup> {
     });
   }
 
-  void _finish(String id) {
+  Future<void> _finish(String id) async {
+    // Came here from a trade fair's "Book a spot"? Go straight back to it.
+    String fair = '';
+    try {
+      final p = await SharedPreferences.getInstance();
+      fair = p.getString('orija_after_store_setup') ?? '';
+      if (fair.isNotEmpty) await p.remove('orija_after_store_setup');
+    } catch (_) {}
+    if (!mounted) return;
+    if (fair.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Your store is ready. Now pick your spot.')));
+      context.pushReplacementNamed('tradeFairPage',
+          queryParameters: {'fairId': fair});
+      return;
+    }
     context.pushReplacementNamed(
       'celebrationPage',
       queryParameters: {

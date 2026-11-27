@@ -68,6 +68,7 @@ import 'package:flutter/material.dart';
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -2567,10 +2568,11 @@ class _FairBubble extends StatefulWidget {
 }
 
 class _FairBubbleState extends State<_FairBubble>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   static const _size = 64.0;
   static const _posKey = 'orija_fair_bubble_pos';
   static const _hideKey = 'orija_fair_bubble_hidden_on';
+  static const _tipKey = 'orija_fair_bubble_tip_seen';
 
   bool _ready = false;
   bool _hidden = false;
@@ -2578,12 +2580,37 @@ class _FairBubbleState extends State<_FairBubble>
   double _yFrac = 0.42; // vertical position, 0 (top) .. 1 (bottom)
   Offset? _drag; // while dragging: the bubble's top-left
   bool _overBin = false;
+  bool _showLabel = false; // the "Book a spot" label beside the bubble
+  bool _showTip = false; // first-time tip
   Timer? _tick;
+  Timer? _labelTimer;
+  Timer? _labelHide;
+
+  // Last day: a stronger pulse.
   late final AnimationController _pulse = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 1600));
+  // Always: a gentle float, and a light sweeping around the ring.
+  late final AnimationController _float = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 1600))
+    ..repeat(reverse: true);
+  late final AnimationController _sweep = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 2600))
+    ..repeat();
 
   DateTime? get _closes =>
       DateTime.tryParse('${widget.fair['booking_closes_at'] ?? ''}')?.toLocal();
+
+  // The viewer's own booking for this fair (get_explore_home adds it).
+  Map<String, dynamic>? get _booking {
+    final b = widget.fair['my_booking'];
+    return b is Map ? Map<String, dynamic>.from(b) : null;
+  }
+
+  int get _tablesLeft {
+    final total = (widget.fair['stalls_total'] as num?)?.toInt() ?? 0;
+    final booked = (widget.fair['stalls_booked'] as num?)?.toInt() ?? 0;
+    return (total - booked).clamp(0, 1 << 30);
+  }
 
   String _today() {
     final d = DateTime.now();
@@ -2604,6 +2631,7 @@ class _FairBubbleState extends State<_FairBubble>
     try {
       final p = await SharedPreferences.getInstance();
       _hidden = p.getString(_hideKey) == _today();
+      _showTip = p.getBool(_tipKey) != true;
       final pos = p.getString(_posKey);
       if (pos != null && pos.contains(':')) {
         final parts = pos.split(':');
@@ -2611,7 +2639,29 @@ class _FairBubbleState extends State<_FairBubble>
         _yFrac = (double.tryParse(parts[1]) ?? _yFrac).clamp(0.0, 1.0);
       }
     } catch (_) {}
-    if (mounted) setState(() => _ready = true);
+    if (!mounted) return;
+    setState(() => _ready = true);
+    // The label slides out shortly after Home opens, then every 20 seconds.
+    if (!_showTip) Future.delayed(const Duration(milliseconds: 1500), _peek);
+    _labelTimer = Timer.periodic(const Duration(seconds: 20), (_) => _peek());
+  }
+
+  void _peek() {
+    if (!mounted || _drag != null || _showTip || _hidden) return;
+    setState(() => _showLabel = true);
+    _labelHide?.cancel();
+    _labelHide = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _showLabel = false);
+    });
+  }
+
+  Future<void> _tipDone({bool open = false}) async {
+    setState(() => _showTip = false);
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setBool(_tipKey, true);
+    } catch (_) {}
+    if (open) _open();
   }
 
   Future<void> _save() async {
@@ -2624,7 +2674,10 @@ class _FairBubbleState extends State<_FairBubble>
 
   Future<void> _hideToday() async {
     HapticFeedback.mediumImpact();
-    setState(() => _hidden = true);
+    setState(() {
+      _hidden = true;
+      _showLabel = false;
+    });
     try {
       final p = await SharedPreferences.getInstance();
       await p.setString(_hideKey, _today());
@@ -2638,6 +2691,13 @@ class _FairBubbleState extends State<_FairBubble>
 
   void _open() {
     HapticFeedback.lightImpact();
+    setState(() => _showLabel = false);
+    // Booked already: open the spot pass.
+    final ref = '${_booking?['booking_ref'] ?? ''}';
+    if (_booking != null && ref.isNotEmpty) {
+      context.pushNamed('stallPassPage', queryParameters: {'bookingRef': ref});
+      return;
+    }
     final community = '${widget.fair['community_id'] ?? ''}';
     showGeneralDialog(
       context: context,
@@ -2671,15 +2731,6 @@ class _FairBubbleState extends State<_FairBubble>
                     ),
                   ),
                 ]),
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    _hideToday();
-                  },
-                  child: const Text('Hide the bubble until tomorrow',
-                      style: TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w600)),
-                ),
               ]),
             ),
           ),
@@ -2706,7 +2757,11 @@ class _FairBubbleState extends State<_FairBubble>
   @override
   void dispose() {
     _tick?.cancel();
+    _labelTimer?.cancel();
+    _labelHide?.cancel();
     _pulse.dispose();
+    _float.dispose();
+    _sweep.dispose();
     super.dispose();
   }
 
@@ -2715,8 +2770,10 @@ class _FairBubbleState extends State<_FairBubble>
     final closes = _closes;
     if (!_ready || _hidden || closes == null) return const SizedBox.shrink();
     final left = closes.difference(DateTime.now());
-    if (left.isNegative) return const SizedBox.shrink();
-    final lastDay = left.inHours < 24;
+    final booking = _booking;
+    final booked = booking != null;
+    if (left.isNegative && !booked) return const SizedBox.shrink();
+    final lastDay = !booked && left.inHours < 24;
     if (lastDay && !_pulse.isAnimating) _pulse.repeat();
     if (!lastDay && _pulse.isAnimating) _pulse.stop();
 
@@ -2725,7 +2782,20 @@ class _FairBubbleState extends State<_FairBubble>
         : '${left.inDays}';
     final small = lastDay ? 'HRS LEFT' : (left.inDays == 1 ? 'DAY' : 'DAYS');
     // Ring: how much of the last 30 days of booking has run out.
-    final ring = (1 - left.inMinutes / (30 * 24 * 60)).clamp(0.04, 1.0);
+    final ring =
+        booked ? 1.0 : (1 - left.inMinutes / (30 * 24 * 60)).clamp(0.04, 1.0);
+    final table = '${booking?['table'] ?? booking?['table_label'] ?? ''}';
+    final colors = booked
+        ? const [Color(0xFF1D7A70), Color(0xFF2A9D8F)]
+        : lastDay
+            ? const [Color(0xFFC0392B), Color(0xFFFE6601)]
+            : const [Color(0xFF86370E), Color(0xFFC2581F)];
+    final accent = booked ? const Color(0xFF1D7A70) : const Color(0xFF86370E);
+    final fairName = '${widget.fair['name'] ?? 'Trade fair'}';
+    final labelTitle = booked ? 'Your spot pass' : 'Book a spot';
+    final labelLine = booked
+        ? (table.isEmpty ? fairName : 'Table $table · $fairName')
+        : '$fairName · $_tablesLeft ${_tablesLeft == 1 ? 'table' : 'tables'} left';
 
     return LayoutBuilder(builder: (context, box) {
       final pad = MediaQuery.paddingOf(context);
@@ -2739,11 +2809,95 @@ class _FairBubbleState extends State<_FairBubble>
       final binCenter =
           Offset(box.maxWidth / 2, box.maxHeight - 100 - pad.bottom - 10);
 
+      final orb = AnimatedBuilder(
+        animation: Listenable.merge([_pulse, _sweep]),
+        builder: (_, __) => Container(
+          width: _size,
+          height: _size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: colors),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0x66000000),
+                blurRadius: _drag != null ? 30 : 18,
+                offset: Offset(0, _drag != null ? 14 : 7),
+              ),
+              if (lastDay)
+                BoxShadow(
+                  color: const Color(0xFFFE6601)
+                      .withValues(alpha: .45 * (1 - _pulse.value)),
+                  spreadRadius: 14 * _pulse.value,
+                ),
+              // A soft glow while the label is out.
+              if (_showLabel && !lastDay)
+                BoxShadow(
+                    color: colors.last.withValues(alpha: .35), spreadRadius: 6),
+            ],
+          ),
+          child: Stack(alignment: Alignment.center, children: [
+            SizedBox(
+              width: _size - 6,
+              height: _size - 6,
+              child: CircularProgressIndicator(
+                value: ring.toDouble(),
+                strokeWidth: 3,
+                color: const Color(0xFFFFF5EE),
+                backgroundColor: const Color(0x38FFF5EE),
+              ),
+            ),
+            // The light sweeping around the ring.
+            if (!booked)
+              Transform.rotate(
+                angle: _sweep.value * 6.2832,
+                child: SizedBox(
+                  width: _size - 6,
+                  height: _size - 6,
+                  child: const CircularProgressIndicator(
+                    value: 0.12,
+                    strokeWidth: 3,
+                    color: Color(0xCCFFFFFF),
+                    backgroundColor: Colors.transparent,
+                  ),
+                ),
+              ),
+            booked
+                ? const Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.check_rounded, color: Colors.white, size: 24),
+                    Text('BOOKED',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w800)),
+                  ])
+                : Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(big,
+                        style: TextStyle(
+                            color: const Color(0xFFFFF5EE),
+                            fontSize: lastDay ? 15 : 20,
+                            height: 1.05,
+                            fontWeight: FontWeight.w800)),
+                    Text(small,
+                        style: const TextStyle(
+                            color: Color(0xD9FFF5EE),
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w700)),
+                  ]),
+          ]),
+        ),
+      );
+
       final bubble = GestureDetector(
-        onTap: _open,
+        onTap: _showTip ? () => _tipDone(open: true) : _open,
         onPanStart: (_) {
           HapticFeedback.selectionClick();
-          setState(() => _drag = docked);
+          setState(() {
+            _drag = docked;
+            _showLabel = false;
+          });
         },
         onPanUpdate: (d) {
           final next = (_drag ?? docked) + d.delta;
@@ -2774,68 +2928,15 @@ class _FairBubbleState extends State<_FairBubble>
         },
         child: Semantics(
           button: true,
-          label: '${widget.fair['name'] ?? 'Trade fair'}: booking closes in '
-              '${lastDay ? '${left.inHours} hours' : '${left.inDays} days'}. Open',
+          label: booked
+              ? 'Your spot pass for $fairName. Open'
+              : '$fairName: book a spot, booking closes in '
+                  '${lastDay ? '${left.inHours} hours' : '${left.inDays} days'}. Open',
           child: AnimatedScale(
             scale: _drag != null ? 1.12 : 1,
             duration: const Duration(milliseconds: 160),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              AnimatedBuilder(
-                animation: _pulse,
-                builder: (_, child) => Container(
-                  width: _size,
-                  height: _size,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: lastDay
-                          ? const [Color(0xFFC0392B), Color(0xFFFE6601)]
-                          : const [Color(0xFF86370E), Color(0xFFB24E1C)],
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0x5986370E),
-                        blurRadius: _drag != null ? 30 : 18,
-                        offset: Offset(0, _drag != null ? 14 : 7),
-                      ),
-                      if (lastDay)
-                        BoxShadow(
-                          color: const Color(0xFFFE6601)
-                              .withValues(alpha: .45 * (1 - _pulse.value)),
-                          spreadRadius: 14 * _pulse.value,
-                        ),
-                    ],
-                  ),
-                  child: child,
-                ),
-                child: Stack(alignment: Alignment.center, children: [
-                  SizedBox(
-                    width: _size - 6,
-                    height: _size - 6,
-                    child: CircularProgressIndicator(
-                      value: ring.toDouble(),
-                      strokeWidth: 3,
-                      color: const Color(0xFFFFF5EE),
-                      backgroundColor: const Color(0x38FFF5EE),
-                    ),
-                  ),
-                  Column(mainAxisSize: MainAxisSize.min, children: [
-                    Text(big,
-                        style: TextStyle(
-                            color: const Color(0xFFFFF5EE),
-                            fontSize: lastDay ? 15 : 20,
-                            height: 1.05,
-                            fontWeight: FontWeight.w800)),
-                    Text(small,
-                        style: const TextStyle(
-                            color: Color(0xD9FFF5EE),
-                            fontSize: 8.5,
-                            fontWeight: FontWeight.w700)),
-                  ]),
-                ]),
-              ),
+              orb,
               Transform.translate(
                 offset: const Offset(0, -9),
                 child: Container(
@@ -2844,12 +2945,14 @@ class _FairBubbleState extends State<_FairBubble>
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(10),
-                    border:
-                        Border.all(color: const Color(0xFF86370E), width: 1.4),
+                    border: Border.all(color: accent, width: 1.4),
                   ),
-                  child: Text(lastDay ? 'Last day' : 'Trade fair',
-                      style: const TextStyle(
-                          color: Color(0xFF86370E),
+                  child: Text(
+                      booked
+                          ? (table.isEmpty ? 'Booked' : 'Table $table')
+                          : (lastDay ? 'Last day' : 'Trade fair'),
+                      style: TextStyle(
+                          color: accent,
                           fontSize: 10,
                           fontWeight: FontWeight.w800)),
                 ),
@@ -2859,39 +2962,189 @@ class _FairBubbleState extends State<_FairBubble>
         ),
       );
 
-      return Stack(children: [
-        // Drop target, only while dragging.
-        if (_drag != null)
-          Positioned(
-            left: binCenter.dx - 28,
-            top: binCenter.dy - 28,
-            child: AnimatedScale(
-              scale: _overBin ? 1.25 : 1,
-              duration: const Duration(milliseconds: 140),
-              child: Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: _overBin
-                      ? const Color(0xFFC0392B)
-                      : const Color(0xBF14181B),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white70, width: 2),
+      // The label slides out of the bubble towards the middle of the screen.
+      final label = GestureDetector(
+        onTap: _open,
+        child: Container(
+          height: 46,
+          padding:
+              EdgeInsets.only(left: _left ? 40 : 14, right: _left ? 14 : 40),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF5EE),
+            borderRadius: BorderRadius.circular(23),
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x73000000),
+                  blurRadius: 18,
+                  offset: Offset(0, 8))
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(labelTitle,
+                    style: TextStyle(
+                        color: accent,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800)),
+                const SizedBox(width: 4),
+                Icon(Icons.arrow_forward_rounded, size: 14, color: accent),
+              ]),
+              ConstrainedBox(
+                constraints:
+                    BoxConstraints(maxWidth: box.maxWidth - _size - 90),
+                child: Text(labelLine,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: Color(0xFF57636C), fontSize: 11)),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final floatDy =
+          _drag != null ? 0.0 : -5 * Curves.easeInOut.transform(_float.value);
+
+      return AnimatedBuilder(
+        animation: _float,
+        builder: (context, _) => Stack(children: [
+          // Drop target, only while dragging.
+          if (_drag != null)
+            Positioned(
+              left: binCenter.dx - 28,
+              top: binCenter.dy - 28,
+              child: AnimatedScale(
+                scale: _overBin ? 1.25 : 1,
+                duration: const Duration(milliseconds: 140),
+                child: Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: _overBin
+                        ? const Color(0xFFC0392B)
+                        : const Color(0xBF14181B),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white70, width: 2),
+                  ),
+                  child: const Icon(Icons.close_rounded,
+                      color: Colors.white, size: 26),
                 ),
-                child: const Icon(Icons.close_rounded,
-                    color: Colors.white, size: 26),
               ),
             ),
+          // First-time tip: dims the screen, points at the bubble.
+          if (_showTip && _drag == null)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _tipDone,
+                child: const ColoredBox(color: Color(0x99000000)),
+              ),
+            ),
+          // "Book a spot" label, tucked under the bubble's inner edge.
+          if (_drag == null && !_showTip)
+            Positioned(
+              top: pos.dy + 9 + floatDy,
+              left: _left ? pos.dx + _size - 30 : null,
+              right: _left ? null : box.maxWidth - pos.dx - 30,
+              child: IgnorePointer(
+                ignoring: !_showLabel,
+                child: AnimatedScale(
+                  scale: _showLabel ? 1 : 0.2,
+                  alignment:
+                      _left ? Alignment.centerLeft : Alignment.centerRight,
+                  duration: const Duration(milliseconds: 380),
+                  curve: _showLabel ? Curves.easeOutBack : Curves.easeInCubic,
+                  child: AnimatedOpacity(
+                    opacity: _showLabel ? 1 : 0,
+                    duration: const Duration(milliseconds: 260),
+                    child: label,
+                  ),
+                ),
+              ),
+            ),
+          AnimatedPositioned(
+            duration: _drag != null
+                ? Duration.zero
+                : const Duration(milliseconds: 320),
+            curve: Curves.easeOutBack,
+            left: pos.dx,
+            top: pos.dy + floatDy,
+            child: bubble,
           ),
-        AnimatedPositioned(
-          duration:
-              _drag != null ? Duration.zero : const Duration(milliseconds: 320),
-          curve: Curves.easeOutBack,
-          left: pos.dx,
-          top: pos.dy,
-          child: bubble,
-        ),
-      ]);
+          if (_showTip && _drag == null)
+            Positioned(
+              top: pos.dy + _size + 22,
+              left: _left ? 12 : null,
+              right: _left ? null : 12,
+              width: math.min(280.0, box.maxWidth - 24),
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF5EE),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: const [
+                      BoxShadow(
+                          color: Color(0x80000000),
+                          blurRadius: 30,
+                          offset: Offset(0, 12))
+                    ],
+                  ),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(booked ? 'Your spot is booked' : 'New: $fairName',
+                            style: const TextStyle(
+                                color: Color(0xFF14181B),
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 4),
+                        Text(
+                            booked
+                                ? 'Tap the bubble anytime to open your spot pass. Drag it if it is in the way.'
+                                : 'Book a table to sell at the fair. Tap the bubble anytime. Drag it if it is in the way.',
+                            style: const TextStyle(
+                                color: Color(0xFF57636C),
+                                fontSize: 12.5,
+                                height: 1.35)),
+                        const SizedBox(height: 10),
+                        Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                onPressed: _tipDone,
+                                child: const Text('Later',
+                                    style: TextStyle(
+                                        color: Color(0xFF57636C),
+                                        fontWeight: FontWeight.w700)),
+                              ),
+                              const SizedBox(width: 4),
+                              ElevatedButton(
+                                onPressed: () => _tipDone(open: true),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: accent,
+                                  foregroundColor: const Color(0xFFFFF5EE),
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(18)),
+                                ),
+                                child: Text(
+                                    booked ? 'Open my pass' : 'Book a spot',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700)),
+                              ),
+                            ]),
+                      ]),
+                ),
+              ),
+            ),
+        ]),
+      );
     });
   }
 }
