@@ -68,6 +68,7 @@ import 'package:flutter/material.dart';
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -173,26 +174,31 @@ class _OrijaExploreState extends State<OrijaExplore> {
     final snap = _ExploreCache.snapshot;
     if (snap != null) {
       _applySnapshot(snap);
+      final last = _ExploreCache.last;
+      if (last != null) _applyExtras(last);
       if (DateTime.now().difference(snap.at) > const Duration(minutes: 5)) {
         _load();
       }
     } else {
       _load();
     }
-    _loadBiddingFlag();
   }
 
-  Future<void> _loadBiddingFlag() async {
-    try {
-      final row = await Supabase.instance.client
-          .from('platform_config')
-          .select('value')
-          .eq('key', 'bidding_enabled')
-          .maybeSingle();
-      final v = row?['value'];
-      final enabled = v is bool ? v : (v == true || v == 'true');
-      if (mounted && row != null) setState(() => _biddingEnabled = enabled);
-    } catch (_) {}
+  // Bidding switch and the accommodation row, from get_explore_home.
+  void _applyExtras(Map<String, dynamic> r) {
+    final b = r['bidding_enabled'];
+    _biddingEnabled = b is bool ? b : true;
+    final stays = r['stays'];
+    if (stays is Map && stays['community_id'] != null) {
+      _staysCommunity = '${stays['community_id']}';
+      _staysSchool = '${stays['school_name'] ?? ''}';
+      _stays = [
+        for (final h in (stays['hostels'] as List? ?? const []))
+          Map<String, dynamic>.from(h as Map)
+      ];
+    } else {
+      _stays = [];
+    }
   }
 
   Future<void> _consumePendingRedirect() async {
@@ -242,31 +248,12 @@ class _OrijaExploreState extends State<OrijaExplore> {
   }
 
   // ---------------------------------------------------------- Accommodation
-  // Orija Campus: hostels at the viewer's own school (list_hostels), shown as
-  // a row below the trade fair card. Loads on its own, so it never slows the
-  // rest of Explore; renders nothing for people without a school.
+  // Orija Campus: hostels at the viewer's own school, shown as a row below the
+  // trade fair card. Comes with get_explore_home; renders nothing for people
+  // without a school.
   List<Map<String, dynamic>> _stays = [];
   String _staysSchool = '';
   String _staysCommunity = '';
-
-  Future<void> _loadStays() async {
-    try {
-      final supabase = Supabase.instance.client;
-      final info = await supabase.rpc('get_my_school_agent_info');
-      if (info is! Map || info['community_id'] == null) return;
-      final res = await supabase.rpc('list_hostels',
-          params: {'p_community_id': info['community_id']});
-      final list = (res is Map ? res['hostels'] as List? : null) ?? const [];
-      if (!mounted) return;
-      setState(() {
-        _staysCommunity = '${info['community_id']}';
-        _staysSchool = '${info['school_name'] ?? ''}';
-        _stays = [
-          for (final h in list.take(12)) Map<String, dynamic>.from(h as Map)
-        ];
-      });
-    } catch (_) {}
-  }
 
   Widget _staysSection(FlutterFlowTheme theme) {
     final short = _staysSchool.split(',').first.trim();
@@ -379,333 +366,151 @@ class _OrijaExploreState extends State<OrijaExplore> {
     ]);
   }
 
-  Future<void> _load() async {
-    _loadStays();
-    final supabase = Supabase.instance.client;
-    try {
-      final me = await supabase
-          .from('users')
-          .select('state, city, institution_id')
-          .eq('id', currentUserUid)
-          .maybeSingle();
-      final myInstitutionId = me?['institution_id'] as String?;
-      final myState = me?['state'] as String?;
-      final myCity = me?['city'] as String?;
+  // The whole screen comes from one database call, get_explore_home (it used
+  // to take ~25 queries one after another). Two caches:
+  //  - in memory (_ExploreCache.snapshot): coming back to Explore within 5
+  //    minutes shows it straight away, no call at all;
+  //  - on the phone (SharedPreferences, per account): after the app is
+  //    reopened, the last Explore shows instantly while a fresh one loads.
+  static const _diskKey = 'orija_explore_home_v1';
 
-      final interests = await supabase
-          .from('user_interests')
-          .select('category')
-          .eq('user_id', currentUserUid);
-      final categories = List<Map<String, dynamic>>.from(interests as List)
-          .map((r) => r['category'] as String?)
-          .whereType<String>()
-          .toSet()
-          .toList();
+  List<Map<String, dynamic>> _maps(dynamic v) => [
+        for (final e in (v as List? ?? const []))
+          if (e is Map) Map<String, dynamic>.from(e)
+      ];
 
-      final joined = await supabase
-          .from('community_members')
-          .select('community_id')
-          .eq('user_id', currentUserUid);
-      final joinedIds = List<Map<String, dynamic>>.from(joined as List)
-          .map((r) => r['community_id'] as String?)
-          .whereType<String>()
-          .toList();
+  Set<String> _ids(dynamic v) => {
+        for (final e in (v as List? ?? const []))
+          if (e != null) '$e'
+      };
 
-      // Ask posts ("question to the community/vendors, reply via DM" -- no
-      // like/comment/save) are only relevant to vendors, so non-vendors
-      // never even fetch them -- not just a UI hide.
-      final myStores = await supabase
-          .from('storefronts')
-          .select('id')
-          .eq('owner_id', currentUserUid)
-          .eq('is_active', true)
-          .limit(1);
-      final isVendor = (myStores as List).isNotEmpty;
-
-      // What this viewer has asked to never see again: individual posts,
-      // individual listings, and everything from a given person (posts AND
-      // listings -- a softer "see fewer from them" than a full block).
-      final postHides = await supabase
-          .from('post_hides')
-          .select('post_id')
-          .eq('user_id', currentUserUid);
-      final hiddenIds = List<Map<String, dynamic>>.from(postHides as List)
-          .map((r) => r['post_id'] as String)
-          .toList();
-      final listingHides = await supabase
-          .from('listing_hides')
-          .select('listing_id')
-          .eq('user_id', currentUserUid);
-      final hiddenListingIds =
-          List<Map<String, dynamic>>.from(listingHides as List)
-              .map((r) => r['listing_id'] as String)
-              .toList();
-      final userHides = await supabase
-          .from('user_hides')
-          .select('hidden_user_id')
-          .eq('user_id', currentUserUid);
-      final hiddenAuthorIds = List<Map<String, dynamic>>.from(userHides as List)
-          .map((r) => r['hidden_user_id'] as String)
-          .toList();
-      var hiddenStorefrontIds = <String>[];
-      if (hiddenAuthorIds.isNotEmpty) {
-        final hiddenStores = await supabase
-            .from('storefronts')
-            .select('id')
-            .inFilter('owner_id', hiddenAuthorIds);
-        hiddenStorefrontIds =
-            List<Map<String, dynamic>>.from(hiddenStores as List)
-                .map((r) => r['id'] as String)
-                .toList();
-      }
-
-      var forYouQuery = supabase
-          .from('listings')
-          .select(
-              'id, title, price, primary_image_url, photos, storefront_id, storefronts!listings_storefront_id_fkey(name, logo_url, slug)')
-          .eq('is_available', true);
-      if (categories.isNotEmpty)
-        forYouQuery = forYouQuery.inFilter('category', categories);
-      if (hiddenListingIds.isNotEmpty) {
-        forYouQuery =
-            forYouQuery.not('id', 'in', '(${hiddenListingIds.join(',')})');
-      }
-      if (hiddenStorefrontIds.isNotEmpty) {
-        forYouQuery = forYouQuery.not(
-            'storefront_id', 'in', '(${hiddenStorefrontIds.join(',')})');
-      }
-      final forYou =
-          await forYouQuery.order('created_at', ascending: false).limit(14);
-
-      var streetQuery =
-          supabase.from('feed_view').select().eq('status', 'visible');
-      if (!isVendor) streetQuery = streetQuery.neq('post_type', 'ask');
-      // An ask stays "active" in the database after its deadline, so hide the
-      // ones whose time has run out.
-      streetQuery = streetQuery.or(
-          'post_type.neq.ask,ask_expires_at.is.null,ask_expires_at.gt.${DateTime.now().toUtc().toIso8601String()}');
-      if (hiddenIds.isNotEmpty) {
-        streetQuery =
-            streetQuery.not('post_id', 'in', '(${hiddenIds.join(',')})');
-      }
-      if (hiddenAuthorIds.isNotEmpty) {
-        streetQuery = streetQuery.not(
-            'author_id', 'in', '(${hiddenAuthorIds.join(',')})');
-      }
-      final street =
-          await streetQuery.order('created_at', ascending: false).limit(12);
-
-      var risingQuery = supabase.from('storefronts_with_review_summary').select(
-          'id, slug, name, logo_url, cover_url, category, city, state, avg_rating, is_verified');
-      if (myState != null) risingQuery = risingQuery.eq('state', myState);
-      final rising =
-          await risingQuery.order('created_at', ascending: false).limit(10);
-
-      var communitiesQuery = supabase
-          .from('communities')
-          .select('id, name, cover_url, category, member_count')
-          .eq('is_active', true);
-      if (categories.isNotEmpty)
-        communitiesQuery = communitiesQuery.inFilter('category', categories);
-      final communitiesRaw = await communitiesQuery
-          .order('member_count', ascending: false)
-          .limit(10);
-      final communitiesMayHaveMore =
-          List<Map<String, dynamic>>.from(communitiesRaw as List).length >= 10;
-      final communities =
-          List<Map<String, dynamic>>.from(communitiesRaw as List)
-              .where((c) => !joinedIds.contains(c['id']))
-              .toList();
-
-      // Markets section: real, physical markets. A market with no vendors
-      // yet still shows -- tagged 'Rising' and sorted first -- so a newly
-      // onboarded market gets visibility to attract its first vendors
-      // instead of being invisible until someone else builds it up.
-      final marketsRaw = await supabase
-          .from('communities')
-          .select(
-              'id, name, slug, cover_url, city, state, is_verified, vendor_count, member_count')
-          .eq('type', 'market')
-          .eq('is_active', true)
-          .order('vendor_count', ascending: false)
-          .limit(10);
-      final markets = List<Map<String, dynamic>>.from(marketsRaw as List)
-        ..sort((a, b) {
-          final av = (a['vendor_count'] as num?)?.toInt() ?? 0;
-          final bv = (b['vendor_count'] as num?)?.toInt() ?? 0;
-          if ((av == 0) != (bv == 0)) return av == 0 ? -1 : 1;
-          return bv.compareTo(av);
-        });
-
-      // Orija Campus: people linked to a school get a "Your school" section
-      // above Markets. Markets itself is unchanged.
-      Map<String, dynamic>? mySchool;
-      if (myInstitutionId != null && myInstitutionId.isNotEmpty) {
-        try {
-          final inst = await supabase
-              .from('institutions')
-              .select('community_id')
-              .eq('id', myInstitutionId)
-              .maybeSingle();
-          final schoolCommunityId = inst?['community_id'] as String?;
-          if (schoolCommunityId != null) {
-            final row = await supabase
-                .from('communities')
-                .select(
-                    'id, name, slug, cover_url, city, state, is_verified, vendor_count, member_count')
-                .eq('id', schoolCommunityId)
-                .eq('is_active', true)
-                .maybeSingle();
-            if (row != null) {
-              mySchool = Map<String, dynamic>.from(row);
-            }
-          }
-        } catch (_) {
-          // The school card is a bonus; never block the Markets section on it.
-        }
-      }
-
-      // A handful of member avatars per shown community, for the avatar-stack
-      // on each card. community_members is publicly SELECT-able and
-      // avatar_url is readable for active users, so this is a plain read.
-      final communityIds = communities.map((c) => c['id'] as String).toList();
-      final communityAvatars = <String, List<String>>{};
-      if (communityIds.isNotEmpty) {
-        final memberRows = await supabase
-            .from('community_members')
-            .select(
-                'community_id, users!community_members_user_id_fkey(avatar_url)')
-            .inFilter('community_id', communityIds)
-            .limit(60);
-        for (final r in List<Map<String, dynamic>>.from(memberRows as List)) {
-          final cid = r['community_id'] as String?;
-          final avatar = (r['users'] as Map?)?['avatar_url'] as String?;
-          if (cid == null) continue;
-          final list = communityAvatars.putIfAbsent(cid, () => []);
-          if (avatar != null && avatar.isNotEmpty && list.length < 3)
-            list.add(avatar);
-        }
-      }
-
-      final declutter = await supabase
-          .from('declutter_submissions')
-          .select('id, title, asking_price, photos, category')
-          .eq('status', 'listed')
-          .order('submitted_at', ascending: false)
-          .limit(10);
-
-      // Fetched via the typed table (not the raw client) because
-      // Cached statically (see _cachedCategoryRows) -- skip the query and
-      // the icon re-downloads entirely once it's been fetched once.
-      final categoryRows = _cachedCategoryRows ??
-          (List<CategoriesRow>.from(await CategoriesTable().queryRows(
-            queryFn: (q) => q.isFilter('parent_slug', null),
-          ))
-            ..sort((a, b) =>
-                a.name.toLowerCase().compareTo(b.name.toLowerCase())));
-      _cachedCategoryRows = categoryRows;
-
-      final streetList = List<Map<String, dynamic>>.from(street as List);
-      final postIds = streetList
-          .map((p) => p['post_id'] as String?)
-          .whereType<String>()
-          .toList();
-      final likedIds = <String>{};
-      final savedIds = <String>{};
-      final recommendedIds = <String>{};
-      if (postIds.isNotEmpty) {
-        final likes = await supabase
-            .from('post_likes')
-            .select('post_id')
-            .eq('user_id', currentUserUid)
-            .inFilter('post_id', postIds);
-        likedIds.addAll(List<Map<String, dynamic>>.from(likes as List)
-            .map((r) => r['post_id'] as String));
-        final saves = await supabase
-            .from('post_saves')
-            .select('post_id')
-            .eq('user_id', currentUserUid)
-            .inFilter('post_id', postIds);
-        savedIds.addAll(List<Map<String, dynamic>>.from(saves as List)
-            .map((r) => r['post_id'] as String));
-        final recs = await supabase
-            .from('post_recommends')
-            .select('post_id')
-            .eq('user_id', currentUserUid)
-            .inFilter('post_id', postIds);
-        recommendedIds.addAll(List<Map<String, dynamic>>.from(recs as List)
-            .map((r) => r['post_id'] as String));
-      }
-
-      // Live Bidding: timed, no-video bids (live_sessions.type='live_bid',
-      // is_video=false) -- storefront-backed or standalone. current_bid
-      // falls back to starting_price before any bid has landed.
-      final liveBidsRaw = await supabase
-          .from('live_sessions')
-          .select(
-              'id, started_at, max_duration_minutes, live_bid_config!inner(item_title, item_photos, listing_id, starting_price, current_bid, listings(primary_image_url, photos))')
-          .eq('type', 'live_bid')
-          .eq('status', 'live')
-          .eq('is_video', false)
-          .order('started_at', ascending: false)
-          .limit(20);
-      final liveBids = List<Map<String, dynamic>>.from(liveBidsRaw as List);
-
-      final meSuspension = await supabase
-          .from('users')
-          .select('bidding_suspended')
-          .eq('id', currentUserUid)
-          .maybeSingle();
-      final biddingSuspended =
-          (meSuspension?['bidding_suspended'] as bool?) ?? false;
-
-      if (!mounted) return;
-      setState(() {
-        _forYou = List<Map<String, dynamic>>.from(forYou as List);
-        _street = streetList;
-        _rising = List<Map<String, dynamic>>.from(rising as List);
-        _communities = communities;
-        _markets = markets;
-        _mySchool = mySchool;
-        _communityAvatars = communityAvatars;
-        _communitiesMayHaveMore = communitiesMayHaveMore;
-        _myCity = myCity;
-        _declutter = List<Map<String, dynamic>>.from(declutter as List);
-        _categoryRows = categoryRows;
-        _liveBids = liveBids;
-        _biddingSuspended = biddingSuspended;
-        _likedPostIds
-          ..clear()
-          ..addAll(likedIds);
-        _savedPostIds
-          ..clear()
-          ..addAll(savedIds);
-        _recommendedPostIds
-          ..clear()
-          ..addAll(recommendedIds);
-        _loading = false;
-        _ExploreCache.snapshot = _ExploreSnapshot(
-          at: DateTime.now(),
-          forYou: _forYou,
-          street: _street,
-          rising: _rising,
-          communities: _communities,
-          markets: _markets,
-          mySchool: _mySchool,
-          communityAvatars: _communityAvatars,
-          communitiesMayHaveMore: _communitiesMayHaveMore,
-          myCity: _myCity,
-          declutter: _declutter,
-          categoryRows: _categoryRows,
-          liveBids: _liveBids,
-          biddingSuspended: _biddingSuspended,
-          liked: Set.of(_likedPostIds),
-          saved: Set.of(_savedPostIds),
-          recommended: Set.of(_recommendedPostIds),
-        );
+  // Puts a get_explore_home result on screen and into the in-memory cache.
+  void _applyResult(Map<String, dynamic> r, {required DateTime at}) {
+    final me = (r['me'] as Map?) ?? const {};
+    final cats = r['categories'];
+    if (cats is List && cats.isNotEmpty) {
+      _cachedCategoryRows = [
+        for (final c in cats)
+          if (c is Map) CategoriesRow(Map<String, dynamic>.from(c))
+      ];
+    }
+    final avatars = <String, List<String>>{};
+    final rawAvatars = r['community_avatars'];
+    if (rawAvatars is Map) {
+      rawAvatars.forEach((k, v) {
+        avatars['$k'] = [for (final a in (v as List? ?? const [])) '$a'];
       });
+    }
+    final mySchool = r['my_school'];
+
+    _forYou = _maps(r['for_you']);
+    _street = _maps(r['street']);
+    _rising = _maps(r['rising']);
+    _communities = _maps(r['communities']);
+    _markets = _maps(r['markets']);
+    _mySchool = mySchool is Map ? Map<String, dynamic>.from(mySchool) : null;
+    _communityAvatars = avatars;
+    _communitiesMayHaveMore = r['communities_may_have_more'] == true;
+    _myCity = me['city'] as String?;
+    _declutter = _maps(r['declutter']);
+    _categoryRows = _cachedCategoryRows ?? _categoryRows;
+    _liveBids = _maps(r['live_bids']);
+    _biddingSuspended = me['bidding_suspended'] == true;
+    _likedPostIds
+      ..clear()
+      ..addAll(_ids(r['liked']));
+    _savedPostIds
+      ..clear()
+      ..addAll(_ids(r['saved']));
+    _recommendedPostIds
+      ..clear()
+      ..addAll(_ids(r['recommended']));
+    _applyExtras(r);
+    _loading = false;
+
+    _ExploreCache.last = r;
+    _ExploreCache.snapshot = _ExploreSnapshot(
+      at: at,
+      forYou: _forYou,
+      street: _street,
+      rising: _rising,
+      communities: _communities,
+      markets: _markets,
+      mySchool: _mySchool,
+      communityAvatars: _communityAvatars,
+      communitiesMayHaveMore: _communitiesMayHaveMore,
+      myCity: _myCity,
+      declutter: _declutter,
+      categoryRows: _categoryRows,
+      liveBids: _liveBids,
+      biddingSuspended: _biddingSuspended,
+      liked: Set.of(_likedPostIds),
+      saved: Set.of(_savedPostIds),
+      recommended: Set.of(_recommendedPostIds),
+    );
+  }
+
+  // Shows the copy saved on the phone (same account only) while the fresh
+  // call runs. Returns true when something was shown.
+  Future<bool> _showSaved() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_diskKey);
+      if (raw == null || raw.isEmpty) return false;
+      final saved = jsonDecode(raw);
+      if (saved is! Map || saved['uid'] != currentUserUid) return false;
+      final r = saved['data'];
+      if (r is! Map) return false;
+      final at = DateTime.tryParse('${saved['at']}') ?? DateTime(2000);
+      if (!mounted || _ExploreCache.snapshot != null) return false;
+      setState(() => _applyResult(Map<String, dynamic>.from(r), at: at));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _saveToPhone(Map<String, dynamic> r) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Categories are kept apart (they barely change); keep the saved copy lean.
+      final copy = Map<String, dynamic>.from(r);
+      if (copy['categories'] == null && _cachedCategoryRows != null) {
+        copy['categories'] = [for (final c in _cachedCategoryRows!) c.data];
+      }
+      await prefs.setString(
+          _diskKey,
+          jsonEncode({
+            'uid': currentUserUid,
+            'at': DateTime.now().toIso8601String(),
+            'data': copy,
+          }));
+    } catch (_) {}
+  }
+
+  Future<void> _load() async {
+    // Nothing on screen yet (first open since the app started): show the
+    // saved copy right away, then replace it with the fresh result.
+    if (_ExploreCache.snapshot == null) await _showSaved();
+
+    final call = Supabase.instance.client.rpc('get_explore_home', params: {
+      'p_include_categories': _cachedCategoryRows == null,
+    }).then(
+        (v) => v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{});
+    _ExploreCache.pending = call;
+    try {
+      final r = await call;
+      if (r.isEmpty) throw Exception('empty');
+      if (!mounted) {
+        _ExploreCache.last = r;
+        return;
+      }
+      setState(() => _applyResult(r, at: DateTime.now()));
+      _saveToPhone(r);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    } finally {
+      if (identical(_ExploreCache.pending, call)) _ExploreCache.pending = null;
     }
   }
 
@@ -2123,6 +1928,10 @@ class _ExploreRightRailState extends State<_ExploreRightRail> {
 /// not reload every time the user comes back to it.
 class _ExploreCache {
   static _ExploreSnapshot? snapshot;
+  // The last get_explore_home result, and the call in flight (if any), so the
+  // billboard and the accommodation row reuse it instead of querying again.
+  static Map<String, dynamic>? last;
+  static Future<Map<String, dynamic>>? pending;
 }
 
 class _ExploreSnapshot {
@@ -2235,31 +2044,52 @@ class _ExploreBillboardState extends State<_ExploreBillboard> {
 
   Future<void> _load() async {
     try {
-      final supabase = Supabase.instance.client;
-      final nowIso = DateTime.now().toUtc().toIso8601String();
-      final rows = await supabase
-          .from('billboard_ads')
-          .select(
-              'id, title, image_url, click_url, cta_label, target_states, target_category, advertiser_name, priority')
-          .eq('is_active', true)
-          .lte('starts_at', nowIso)
-          .or('expires_at.is.null,expires_at.gt.$nowIso')
-          .order('priority', ascending: false)
-          .limit(12);
-      final me = await supabase
-          .from('users')
-          .select('state')
-          .eq('id', currentUserUid)
-          .maybeSingle();
-      final myState = _norm((me?['state'] as String?) ?? '');
-      final interests = await supabase
-          .from('user_interests')
-          .select('category')
-          .eq('user_id', currentUserUid);
-      final myCategories = List<Map<String, dynamic>>.from(interests as List)
-          .map((r) => r['category'] as String?)
-          .whereType<String>()
-          .toSet();
+      // The ads, the viewer's state and interests come with Explore's own
+      // get_explore_home call: wait for it if it is still running.
+      Map<String, dynamic>? r = _ExploreCache.last;
+      final pending = _ExploreCache.pending;
+      if (pending != null) {
+        try {
+          r = await pending;
+        } catch (_) {}
+      }
+      final List rows;
+      final String myState;
+      final Set<String> myCategories;
+      if (r != null && r['billboard'] is List) {
+        rows = r['billboard'] as List;
+        myState = _norm(((r['me'] as Map?)?['state'] as String?) ?? '');
+        myCategories = {
+          for (final c in (r['interests'] as List? ?? const [])) '$c'
+        };
+      } else {
+        // Explore's call failed: load the ads on their own, as before.
+        final supabase = Supabase.instance.client;
+        final nowIso = DateTime.now().toUtc().toIso8601String();
+        rows = await supabase
+            .from('billboard_ads')
+            .select(
+                'id, title, image_url, click_url, cta_label, target_states, target_category, advertiser_name, priority')
+            .eq('is_active', true)
+            .lte('starts_at', nowIso)
+            .or('expires_at.is.null,expires_at.gt.$nowIso')
+            .order('priority', ascending: false)
+            .limit(12) as List;
+        final me = await supabase
+            .from('users')
+            .select('state')
+            .eq('id', currentUserUid)
+            .maybeSingle();
+        myState = _norm((me?['state'] as String?) ?? '');
+        final interests = await supabase
+            .from('user_interests')
+            .select('category')
+            .eq('user_id', currentUserUid);
+        myCategories = List<Map<String, dynamic>>.from(interests as List)
+            .map((x) => x['category'] as String?)
+            .whereType<String>()
+            .toSet();
+      }
 
       final ads = List<Map<String, dynamic>>.from(rows as List)
           .where((a) {
