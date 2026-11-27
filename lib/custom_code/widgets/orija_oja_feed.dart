@@ -368,8 +368,22 @@ class _OrijaOjaFeedState extends State<OrijaOjaFeed> {
     return const SizedBox.shrink();
   }
 
+  // Oja Street is a full-screen media feed: it is always dark, whatever the
+  // phone's light/dark setting. Everything inside (the slides, the "Picked for
+  // you" grid, the sheets it opens) reads the app's dark colours.
   @override
   Widget build(BuildContext context) {
+    final base = Theme.of(context);
+    return Theme(
+      data: base.copyWith(
+        brightness: Brightness.dark,
+        colorScheme: base.colorScheme.copyWith(brightness: Brightness.dark),
+      ),
+      child: Builder(builder: _buildFeed),
+    );
+  }
+
+  Widget _buildFeed(BuildContext context) {
     final t = FlutterFlowTheme.of(context);
     Widget body;
     if (_loading) {

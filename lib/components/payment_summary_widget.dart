@@ -813,7 +813,7 @@ class _PaymentSummaryWidgetState extends State<PaymentSummaryWidget> {
                       _model.apiResult5fgg = await InitializePaymentCall.call(
                         orderID: containerVOrderFullRow.orderId,
                         callBackUrl:
-                            'orija://orija.app${GoRouterState.of(context).uri.toString()}',
+                            'orija://campus.orija.app${GoRouterState.of(context).uri.toString()}',
                       );
 
                       if ((_model.apiResult5fgg?.succeeded ?? true)) {

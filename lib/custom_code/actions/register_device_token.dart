@@ -88,21 +88,15 @@ Future<void> _orijaSaveToken(String userId, String token) async {
       'fcm_token': token,
       'platform': platform,
       'app_version': appVersion,
+      // Orija Campus shares the Firebase project and database with the main
+      // Orija app: this tells send-push-notification which app the device is.
+      'app': 'campus',
       'last_seen_at': DateTime.now().toUtc().toIso8601String(),
     }, onConflict: 'user_id,device_fingerprint');
   } catch (e) {
     print('device_sessions upsert failed: $e');
   }
-
-  try {
-    // Mirror for send-push-notification's fallback path, which still reads
-    // users.fcm_token when a user has no device_sessions rows yet.
-    await SupaFlow.client
-        .from('users')
-        .update({'fcm_token': token}).eq('id', userId);
-  } catch (e) {
-    print('users.fcm_token mirror failed: $e');
-  }
+  // No users.fcm_token mirror here: that field is the main app's fallback.
 }
 
 /// A stable id for this install. Deliberately a generated UUID held in

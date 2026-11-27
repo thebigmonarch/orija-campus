@@ -168,15 +168,17 @@ class _OrijaExploreState extends State<OrijaExplore> {
     // once, and send them on instead of leaving them on Home.
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _consumePendingRedirect());
-    // Come back to Explore without a reload: reuse what was loaded this
-    // session and only refetch once it is a few minutes old. Pull-to-refresh
-    // and post changes still force a fresh load.
+    // Come back to Explore without waiting: show what was loaded this session
+    // straight away, and refresh it quietly in the background once it is over
+    // a minute old (one fast call), so changes such as the bidding switch or a
+    // new live bid show up within seconds. Pull-to-refresh and post changes
+    // still force a fresh load.
     final snap = _ExploreCache.snapshot;
     if (snap != null) {
       _applySnapshot(snap);
       final last = _ExploreCache.last;
       if (last != null) _applyExtras(last);
-      if (DateTime.now().difference(snap.at) > const Duration(minutes: 5)) {
+      if (DateTime.now().difference(snap.at) > const Duration(minutes: 1)) {
         _load();
       }
     } else {
@@ -782,7 +784,16 @@ class _OrijaExploreState extends State<OrijaExplore> {
       backgroundColor: theme.primaryBackground,
       body: Stack(
         children: [
-          _buildBody(theme),
+          // Scrolling shrinks the + Post button to a circle, and hides it
+          // while scrolling down.
+          NotificationListener<ScrollNotification>(
+            onNotification: OrijaCreateFab.handleScroll,
+            child: _buildBody(theme),
+          ),
+          // The + Post button (Sell, Ask, Quick Sell). Phones only: the
+          // desktop shell has these in its side menu.
+          if (!OrijaDesktopShell.isDesktop(context))
+            const Positioned.fill(child: OrijaCreateFab()),
           // Floating trigger button removed -- the Categories rail's 'See
           // more' is now the only way in, so this only ever renders the
           // expanded grid overlay (never a floating button underneath it).

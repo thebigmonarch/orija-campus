@@ -348,31 +348,9 @@ Future<void> _saveTokenToUsers(String userId, String token) async {
   } catch (e) {
     _logPush('device_session_failed', '$e');
   }
-  try {
-    debugPrint('  → [4g] writing fcm_token for userId: $userId');
-
-    final response = await SupaFlow.client
-        .from('users')
-        .update({'fcm_token': token})
-        .eq('id', userId)
-        .select();
-
-    debugPrint(
-        '  → [4h] Supabase update response (rows matched): ${response.length}');
-    _logPush(response.isEmpty ? 'users_update_zero_rows' : 'users_update_ok');
-    if (response.isEmpty) {
-      debugPrint(
-          '  ⚠️ [4h] 0 rows matched — check that userId equals the value in the "id" column, and check RLS policy on users table allows this update');
-    } else {
-      debugPrint('  ✅ [4h] FCM token saved to users table');
-    }
-  } catch (e) {
-    debugPrint('  ❌ [4g] _saveTokenToUsers error: $e');
-    _logPush('users_update_failed', '$e');
-    debugPrint('     userId was: $userId');
-    debugPrint(
-        '     token prefix: ${token.substring(0, token.length < 20 ? token.length : 20)}');
-  }
+  // Orija Campus does not write users.fcm_token: that single field is the
+  // main Orija app's fallback, and a Campus token there would get main-app
+  // pushes. Campus devices are in device_sessions with app = 'campus'.
 }
 
 // ─── Foreground + tap handlers ────────────────────────────────────────────────

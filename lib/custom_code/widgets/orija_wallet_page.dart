@@ -819,11 +819,59 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
   String? _resolvedName;
   bool _submitting = false;
   String? _error;
+  // The account used last time (get_saved_payout_account): offered straight
+  // away so a repeat withdrawal is just the amount. "Change" goes back to the
+  // bank + account number form.
+  Map<String, dynamic>? _saved;
+  bool _useSaved = false;
 
   @override
   void initState() {
     super.initState();
     _loadBanks();
+    _loadSaved();
+  }
+
+  Future<void> _loadSaved() async {
+    try {
+      final res =
+          await Supabase.instance.client.rpc('get_saved_payout_account');
+      if (!mounted || res is! Map || res['account_number'] == null) return;
+      final s = Map<String, dynamic>.from(res);
+      setState(() {
+        _saved = s;
+        _useSaved = true;
+        _bankCode = s['bank_code'] as String?;
+        _bankName = s['bank_name'] as String?;
+        _accountNumber.text = '${s['account_number']}';
+        _resolvedName = s['account_name'] as String?;
+      });
+    } catch (_) {}
+  }
+
+  void _changeAccount() {
+    setState(() {
+      _useSaved = false;
+      _bankCode = null;
+      _bankName = null;
+      _accountNumber.clear();
+      _resolvedName = null;
+      _error = null;
+    });
+  }
+
+  String get _savedBankName {
+    final named = (_saved?['bank_name'] as String?) ?? '';
+    if (named.isNotEmpty) return named;
+    for (final b in _banks) {
+      if (b['code'] == _saved?['bank_code']) return '${b['name']}';
+    }
+    return 'Bank';
+  }
+
+  String get _savedMasked {
+    final n = '${_saved?['account_number'] ?? ''}';
+    return n.length > 4 ? '•••• ${n.substring(n.length - 4)}' : n;
   }
 
   @override
@@ -994,100 +1042,156 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
               ),
             ),
             const SizedBox(height: 12),
-            _loadingBanks
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Center(
-                        child: SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2))))
-                : DropdownButtonFormField<String>(
-                    initialValue: _bankCode,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      hintText: 'Select your bank',
-                      filled: true,
-                      fillColor: theme.primaryBackground,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: theme.alternate),
-                      ),
-                    ),
-                    items: [
-                      for (final b in _banks)
-                        DropdownMenuItem(
-                          value: b['code'] as String,
-                          child: Text('${b['name']}',
-                              overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (v) => setState(() {
-                      _bankCode = v;
-                      _bankName = _banks
-                          .firstWhere((b) => b['code'] == v)['name'] as String?;
-                      _resolvedName = null;
-                    }),
-                  ),
-            const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _accountNumber,
-                    keyboardType: TextInputType.number,
-                    maxLength: 10,
-                    style: TextStyle(color: theme.primaryText),
-                    onChanged: (_) => setState(() => _resolvedName = null),
-                    decoration: InputDecoration(
-                      hintText: 'Account number',
-                      counterText: '',
-                      filled: true,
-                      fillColor: theme.primaryBackground,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: theme.alternate),
-                      ),
-                    ),
-                  ),
+            if (_useSaved && _saved != null) ...[
+              Text('Send to',
+                  style: TextStyle(color: theme.secondaryText, fontSize: 12.5)),
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.primaryBackground,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: theme.alternate),
                 ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  height: 48,
-                  child: OutlinedButton(
-                    onPressed: _resolving ? null : _resolve,
-                    child: _resolving
-                        ? SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: theme.primary))
-                        : const Text('Verify'),
+                child: Row(children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: theme.primary.withValues(alpha: .12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.account_balance_rounded,
+                        color: theme.primary, size: 20),
                   ),
-                ),
-              ],
-            ),
-            if (_resolvedName != null) ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Icon(Icons.check_circle_rounded,
-                      size: 16, color: theme.success),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Text(_resolvedName!,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${_saved!['account_name']}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: theme.primaryText,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 2),
+                        Text('$_savedBankName · $_savedMasked',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: theme.secondaryText, fontSize: 12.5)),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _submitting ? null : _changeAccount,
+                    child: Text('Change',
                         style: TextStyle(
-                            color: theme.primaryText,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600)),
+                            color: theme.secondary,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                ]),
+              ),
+            ] else ...[
+              _loadingBanks
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Center(
+                          child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 2))))
+                  : DropdownButtonFormField<String>(
+                      initialValue: _bankCode,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        hintText: 'Select your bank',
+                        filled: true,
+                        fillColor: theme.primaryBackground,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: theme.alternate),
+                        ),
+                      ),
+                      items: [
+                        for (final b in _banks)
+                          DropdownMenuItem(
+                            value: b['code'] as String,
+                            child: Text('${b['name']}',
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                      ],
+                      onChanged: (v) => setState(() {
+                        _bankCode = v;
+                        _bankName =
+                            _banks.firstWhere((b) => b['code'] == v)['name']
+                                as String?;
+                        _resolvedName = null;
+                      }),
+                    ),
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _accountNumber,
+                      keyboardType: TextInputType.number,
+                      maxLength: 10,
+                      style: TextStyle(color: theme.primaryText),
+                      onChanged: (_) => setState(() => _resolvedName = null),
+                      decoration: InputDecoration(
+                        hintText: 'Account number',
+                        counterText: '',
+                        filled: true,
+                        fillColor: theme.primaryBackground,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: theme.alternate),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    height: 48,
+                    child: OutlinedButton(
+                      onPressed: _resolving ? null : _resolve,
+                      child: _resolving
+                          ? SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: theme.primary))
+                          : const Text('Verify'),
+                    ),
                   ),
                 ],
               ),
+              if (_resolvedName != null) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Icon(Icons.check_circle_rounded,
+                        size: 16, color: theme.success),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(_resolvedName!,
+                          style: TextStyle(
+                              color: theme.primaryText,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              ],
             ],
             if (_error != null) ...[
               const SizedBox(height: 10),

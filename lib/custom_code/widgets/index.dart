@@ -141,3 +141,4 @@ export '/custom_code/widgets/orija_room_offer_card.dart'
     show OrijaRoomOfferCard;
 export '/custom_code/widgets/orija_room_request_agent.dart'
     show OrijaRoomRequestAgent;
+export '/custom_code/widgets/orija_create_fab.dart' show OrijaCreateFab;

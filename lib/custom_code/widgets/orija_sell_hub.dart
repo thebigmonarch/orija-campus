@@ -26,9 +26,8 @@ import '/index.dart';
 ///  2. Open a storefront: Online and Declutter (the Physical store option is
 ///     hidden in Orija Campus). Declutter is a kind
 ///     of storefront and stays "coming soon" until the server flag is on.
-///  3. Quick Sell, on its own. Individuals can't sell directly on Orija: they
-///     post an item, find a well-rated declutter storefront and send it an
-///     offer to sell on their behalf. Coming soon.
+///  3. Quick Sell, on its own: one item as a timed bid (createBidListing), no
+///     storefront needed. Checks the bidding switch and suspension first.
 ///
 /// Wording about plans stays neutral (no prices, no upgrade prompts) so the
 /// same screen is safe in the iOS and Android builds.
@@ -120,6 +119,47 @@ class _OrijaSellHubState extends State<OrijaSellHub> {
   Future<void> _open(String route, Map<String, String> params) async {
     await context.pushNamed(route, queryParameters: params);
     if (mounted) _load();
+  }
+
+  // Quick Sell = a timed bid listing (createBidListing), no storefront needed.
+  // Same checks as Explore's Create circle: bidding switched on, and the
+  // person's bidding not suspended.
+  bool _quickSellBusy = false;
+  Future<void> _quickSell() async {
+    if (_quickSellBusy) return;
+    setState(() => _quickSellBusy = true);
+    String? blocked;
+    try {
+      final db = Supabase.instance.client;
+      final cfg = await db
+          .from('platform_config')
+          .select('value')
+          .eq('key', 'bidding_enabled')
+          .maybeSingle();
+      final v = cfg?['value'];
+      if (cfg != null && !(v == true || v == 'true')) {
+        blocked = 'Quick Sell is paused right now. Try again later.';
+      } else {
+        final me = await db
+            .from('users')
+            .select('bidding_suspended')
+            .eq('id', currentUserUid)
+            .maybeSingle();
+        if (me?['bidding_suspended'] == true) {
+          blocked = 'Your bidding privileges are currently suspended.';
+        }
+      }
+    } catch (_) {
+      // Can't check right now: let them through; the bid page checks again.
+    }
+    if (!mounted) return;
+    setState(() => _quickSellBusy = false);
+    if (blocked != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(blocked)));
+      return;
+    }
+    await _open('createBidListing', {});
   }
 
   void _createListing(Map<String, dynamic> s) {
@@ -572,9 +612,9 @@ class _OrijaSellHubState extends State<OrijaSellHub> {
                 icon: Icons.bolt_rounded,
                 title: 'Quick Sell',
                 blurb:
-                    'No storefront needed. Post an item, pick a highly rated declutter storefront and send it an offer to sell for you.',
-                tag: 'Coming soon',
-                onTap: null,
+                    'No storefront needed. Post one item for a timed bid: buyers bid, the highest bid wins and pays through Orija.',
+                tag: 'New',
+                onTap: _quickSellBusy ? null : _quickSell,
               ),
             ],
           ),

@@ -74,7 +74,9 @@ class _NavBarWidgetState extends State<NavBarWidget> {
       child: Container(
         width: double.infinity,
         decoration: BoxDecoration(
-          color: FlutterFlowTheme.of(context).secondaryBackground,
+          color: widget.selectedIndex == 2
+              ? FlutterFlowTheme.of(context).streetNav
+              : FlutterFlowTheme.of(context).secondaryBackground,
           boxShadow: [
             BoxShadow(
               blurRadius: 8.0,
@@ -115,7 +117,9 @@ class _NavBarWidgetState extends State<NavBarWidget> {
                           Icons.home_outlined,
                           color: widget.selectedIndex == 0
                               ? FlutterFlowTheme.of(context).primary
-                              : FlutterFlowTheme.of(context).secondaryText,
+                              : (widget.selectedIndex == 2
+                                  ? FlutterFlowTheme.of(context).streetNavText
+                                  : FlutterFlowTheme.of(context).secondaryText),
                           size: 24.0,
                         ),
                         Text(
@@ -127,8 +131,11 @@ class _NavBarWidgetState extends State<NavBarWidget> {
                                     .labelSmallFamily,
                                 color: widget.selectedIndex == 0
                                     ? FlutterFlowTheme.of(context).primary
-                                    : FlutterFlowTheme.of(context)
-                                        .secondaryText,
+                                    : (widget.selectedIndex == 2
+                                        ? FlutterFlowTheme.of(context)
+                                            .streetNavText
+                                        : FlutterFlowTheme.of(context)
+                                            .secondaryText),
                                 letterSpacing: 0.0,
                                 useGoogleFonts: !FlutterFlowTheme.of(context)
                                     .labelSmallIsCustom,
@@ -197,7 +204,10 @@ class _NavBarWidgetState extends State<NavBarWidget> {
                                 fontPackage: 'font_awesome_flutter')),
                             color: widget.selectedIndex == 1
                                 ? FlutterFlowTheme.of(context).primary
-                                : FlutterFlowTheme.of(context).secondaryText,
+                                : (widget.selectedIndex == 2
+                                    ? FlutterFlowTheme.of(context).streetNavText
+                                    : FlutterFlowTheme.of(context)
+                                        .secondaryText),
                             size: 24.0,
                           ),
                         ),
@@ -210,8 +220,11 @@ class _NavBarWidgetState extends State<NavBarWidget> {
                                     .labelSmallFamily,
                                 color: widget.selectedIndex == 1
                                     ? FlutterFlowTheme.of(context).primary
-                                    : FlutterFlowTheme.of(context)
-                                        .secondaryText,
+                                    : (widget.selectedIndex == 2
+                                        ? FlutterFlowTheme.of(context)
+                                            .streetNavText
+                                        : FlutterFlowTheme.of(context)
+                                            .secondaryText),
                                 letterSpacing: 0.0,
                                 useGoogleFonts: !FlutterFlowTheme.of(context)
                                     .labelSmallIsCustom,
@@ -245,7 +258,7 @@ class _NavBarWidgetState extends State<NavBarWidget> {
                               fontFamily: 'FontAwesomeSolid',
                               fontPackage: 'font_awesome_flutter')),
                           color: widget.selectedIndex == 2
-                              ? FlutterFlowTheme.of(context).primary
+                              ? FlutterFlowTheme.of(context).secondary
                               : FlutterFlowTheme.of(context).secondaryText,
                           size: 34.0,
                         ),
@@ -310,7 +323,10 @@ class _NavBarWidgetState extends State<NavBarWidget> {
                             Icons.notifications_none,
                             color: widget.selectedIndex == 3
                                 ? FlutterFlowTheme.of(context).primary
-                                : FlutterFlowTheme.of(context).secondaryText,
+                                : (widget.selectedIndex == 2
+                                    ? FlutterFlowTheme.of(context).streetNavText
+                                    : FlutterFlowTheme.of(context)
+                                        .secondaryText),
                             size: 24.0,
                           ),
                         ),
@@ -323,8 +339,11 @@ class _NavBarWidgetState extends State<NavBarWidget> {
                                     .labelSmallFamily,
                                 color: widget.selectedIndex == 3
                                     ? FlutterFlowTheme.of(context).primary
-                                    : FlutterFlowTheme.of(context)
-                                        .secondaryText,
+                                    : (widget.selectedIndex == 2
+                                        ? FlutterFlowTheme.of(context)
+                                            .streetNavText
+                                        : FlutterFlowTheme.of(context)
+                                            .secondaryText),
                                 letterSpacing: 0.0,
                                 useGoogleFonts: !FlutterFlowTheme.of(context)
                                     .labelSmallIsCustom,
@@ -357,13 +376,19 @@ class _NavBarWidgetState extends State<NavBarWidget> {
                           width: 40.0,
                           height: 40.0,
                           decoration: BoxDecoration(
-                            color: FlutterFlowTheme.of(context)
-                                .secondaryBackground,
+                            color: widget.selectedIndex == 2
+                                ? FlutterFlowTheme.of(context).streetNav
+                                : FlutterFlowTheme.of(context)
+                                    .secondaryBackground,
                             shape: BoxShape.circle,
                             border: Border.all(
                               color: widget.selectedIndex == 4
                                   ? FlutterFlowTheme.of(context).primary
-                                  : FlutterFlowTheme.of(context).secondaryText,
+                                  : (widget.selectedIndex == 2
+                                      ? FlutterFlowTheme.of(context)
+                                          .streetNavText
+                                      : FlutterFlowTheme.of(context)
+                                          .secondaryText),
                               width: 1.5,
                             ),
                           ),
