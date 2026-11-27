@@ -9,9 +9,11 @@ class CommunitiesByInterestWidget extends StatefulWidget {
   const CommunitiesByInterestWidget({
     super.key,
     required this.category,
+    this.typeFilter,
   });
 
   final String? category;
+  final String? typeFilter;
 
   static String routeName = 'communitiesByInterest';
   static String routePath = 'communitiesByInterest';
@@ -57,6 +59,7 @@ class _CommunitiesByInterestWidgetState
           child: Container(
             child: custom_widgets.OrijaDiscoverCommunities(
               category: widget.category,
+              communityType: widget.typeFilter,
             ),
           ),
         ),

@@ -188,6 +188,19 @@ class _OrijaExploreState extends State<OrijaExplore> {
 
   // Bidding switch and the accommodation row, from get_explore_home.
   void _applyExtras(Map<String, dynamic> r) {
+    final ms = r['my_store'];
+    _myStore = ms is Map ? Map<String, dynamic>.from(ms) : null;
+    _more = [
+      for (final m in (r['more'] as List? ?? const []))
+        if (m is Map) Map<String, dynamic>.from(m)
+    ];
+    _moreDone = _more.length < 20;
+    final tf = r['trade_fair'];
+    _tradeFair = tf is Map ? Map<String, dynamic>.from(tf) : null;
+    _trending = [
+      for (final t in (r['trending'] as List? ?? const []))
+        if (t is Map) Map<String, dynamic>.from(t)
+    ];
     final b = r['bidding_enabled'];
     _biddingEnabled = b is bool ? b : true;
     final stays = r['stays'];
@@ -201,6 +214,38 @@ class _OrijaExploreState extends State<OrijaExplore> {
     } else {
       _stays = [];
     }
+  }
+
+  Future<void> _loadMore() async {
+    if (_moreLoading || _moreDone || _loading) return;
+    setState(() => _moreLoading = true);
+    try {
+      final res = await Supabase.instance.client.rpc('get_more_for_you',
+          params: {'p_offset': _more.length, 'p_limit': 20});
+      final page = [
+        for (final m in (res is List ? res : const []))
+          if (m is Map) Map<String, dynamic>.from(m)
+      ];
+      if (!mounted) return;
+      setState(() {
+        final seen = {for (final m in _more) '${m['id']}'};
+        _more.addAll(page.where((m) => !seen.contains('${m['id']}')));
+        _moreDone = page.length < 20;
+        _moreLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _moreLoading = false);
+    }
+  }
+
+  bool _onScroll(ScrollNotification n) {
+    OrijaCreateFab.handleScroll(n);
+    if (n.depth == 0 &&
+        n.metrics.axis == Axis.vertical &&
+        n.metrics.extentAfter < 700) {
+      _loadMore();
+    }
+    return false;
   }
 
   Future<void> _consumePendingRedirect() async {
@@ -254,6 +299,18 @@ class _OrijaExploreState extends State<OrijaExplore> {
   // trade fair card. Comes with get_explore_home; renders nothing for people
   // without a school.
   List<Map<String, dynamic>> _stays = [];
+  // Trending on campus (get_explore_home.trending).
+  List<Map<String, dynamic>> _trending = [];
+  // Your store today (get_explore_home.my_store), owners only.
+  Map<String, dynamic>? _myStore;
+  // More for you: the endless grid at the bottom. Its first page comes with
+  // get_explore_home; scrolling near the end fetches the next with
+  // get_more_for_you.
+  List<Map<String, dynamic>> _more = [];
+  bool _moreLoading = false;
+  bool _moreDone = false;
+  // The trade fair bubble (get_explore_home.trade_fair).
+  Map<String, dynamic>? _tradeFair;
   String _staysSchool = '';
   String _staysCommunity = '';
 
@@ -778,6 +835,153 @@ class _OrijaExploreState extends State<OrijaExplore> {
     return _mobileBody(context);
   }
 
+  // "Your store today": sellers see orders waiting, unread messages and today's
+  // views; agents see new room requests instead of orders.
+  Widget _storeToday(FlutterFlowTheme theme) {
+    final s = _myStore!;
+    final agent = s['type'] == 'agent';
+    int n(String k) => (s[k] as num?)?.toInt() ?? 0;
+    Widget stat(int value, String label, {bool alert = false}) => Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: theme.primaryBackground,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Text('$value',
+                    style: TextStyle(
+                        color: theme.primaryText,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800)),
+                if (alert && value > 0) ...[
+                  const SizedBox(width: 5),
+                  Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                          color: theme.error, shape: BoxShape.circle)),
+                ],
+              ]),
+              Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: theme.secondaryText, fontSize: 11)),
+            ]),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => agent
+            ? context.pushNamed('myHostels',
+                queryParameters: {'storefrontId': '${s['store_id']}'})
+            : context.pushNamed('myStorefront'),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: theme.secondaryBackground,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: theme.alternate),
+          ),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              Expanded(
+                child: Text('Your store today · ${s['name'] ?? ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: theme.primaryText,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700)),
+              ),
+              Text('Open ›',
+                  style: TextStyle(
+                      color: theme.primary,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700)),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              agent
+                  ? stat(n('room_requests'), 'room requests', alert: true)
+                  : stat(n('new_orders'), 'orders waiting', alert: true),
+              const SizedBox(width: 8),
+              stat(n('unread_messages'), 'messages', alert: true),
+              const SizedBox(width: 8),
+              stat(n('views_today'), 'views today'),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  // "More for you": a two-column grid that keeps loading as you scroll.
+  Widget _moreGrid(FlutterFlowTheme theme) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: _more.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 14,
+        crossAxisSpacing: 12,
+        childAspectRatio: 0.7,
+      ),
+      itemBuilder: (context, i) {
+        final item = _more[i];
+        final store = (item['storefronts'] as Map?) ?? {};
+        final photos = List<String>.from(item['photos'] as List? ?? []);
+        final img = item['primary_image_url'] as String? ??
+            (photos.isNotEmpty ? photos.first : null);
+        return InkWell(
+          onTap: () => context.pushNamed('listingdetailPage',
+              queryParameters: {'listingId': '${item['id']}'}),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: (img ?? '').isEmpty
+                      ? Container(
+                          color: theme.alternate,
+                          child: Icon(Icons.image_outlined,
+                              color: theme.secondaryText))
+                      : Image.network(img!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              Container(color: theme.alternate)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(item['title'] as String? ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: theme.primaryText, fontSize: 12.5)),
+            Text(_naira(item['price'] as num?),
+                style: TextStyle(
+                    color: theme.primary,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700)),
+            Text(store['name'] as String? ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: theme.secondaryText, fontSize: 10.5)),
+          ]),
+        );
+      },
+    );
+  }
+
   Widget _mobileBody(BuildContext context) {
     final theme = FlutterFlowTheme.of(context);
     return Scaffold(
@@ -787,11 +991,17 @@ class _OrijaExploreState extends State<OrijaExplore> {
           // Scrolling shrinks the + Post button to a circle, and hides it
           // while scrolling down.
           NotificationListener<ScrollNotification>(
-            onNotification: OrijaCreateFab.handleScroll,
+            onNotification: _onScroll,
             child: _buildBody(theme),
           ),
           // The + Post button (Sell, Ask, Quick Sell). Phones only: the
           // desktop shell has these in its side menu.
+          // The trade fair bubble: draggable, opens the full card.
+          if (_tradeFair != null && !OrijaDesktopShell.isDesktop(context))
+            Positioned.fill(
+                child: _FairBubble(
+                    key: ValueKey('fair_${_tradeFair!['id']}'),
+                    fair: _tradeFair!)),
           if (!OrijaDesktopShell.isDesktop(context))
             const Positioned.fill(child: OrijaCreateFab()),
           // Floating trigger button removed -- the Categories rail's 'See
@@ -1010,15 +1220,9 @@ class _OrijaExploreState extends State<OrijaExplore> {
                     ),
                   ],
 
-                  // ------------------------------------------------------ Trade fairs
-                  // Orija Campus: every open trade fair (the viewer's school
-                  // first), right below Categories. Renders nothing when
-                  // there are none.
-                  const OrijaTradeFairCard(),
-
-                  // -------------------------------------------- Accommodation
-                  // Hostels at the viewer's school, right below the trade fair.
-                  if (_stays.isNotEmpty) _staysSection(theme),
+                  // --------------------------------------------- Your store today
+                  // Owners only: what needs them at their store right now.
+                  if (_myStore != null) _storeToday(theme),
 
                   // ------------------------------------------------------ Live Bidding
                   // Timed, no-video bids. Unlike every other section here, this
@@ -1026,38 +1230,18 @@ class _OrijaExploreState extends State<OrijaExplore> {
                   // the persistent "open a bid" entry point, not just a content
                   // list that can legitimately be empty. It IS gated behind the
                   // platform_config.bidding_enabled kill switch, though.
-                  if (_biddingEnabled) ...[
-                    _sectionHeader('Live Bidding', theme),
+                  // Only while something is live; new bids start from + Create.
+                  if (_biddingEnabled && _liveBids.isNotEmpty) ...[
+                    _sectionHeader('Live now', theme),
                     SizedBox(
                       height: 108,
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
                         padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: _liveBids.length + 2,
+                        itemCount: _liveBids.length + 1,
                         separatorBuilder: (_, __) => const SizedBox(width: 14),
                         itemBuilder: (context, i) {
-                          if (i == 0) {
-                            return _bidCircle(
-                              theme: theme,
-                              borderColors: [theme.primary, theme.secondary],
-                              fillColor: theme.secondaryBackground,
-                              child: Icon(Icons.add_rounded,
-                                  color: theme.primary, size: 28),
-                              label: 'Create',
-                              onTap: () {
-                                if (_biddingSuspended) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                        content: Text(
-                                            'Your bidding privileges are currently suspended.')),
-                                  );
-                                  return;
-                                }
-                                context.pushNamed('createBidListing');
-                              },
-                            );
-                          }
-                          if (i == _liveBids.length + 1) {
+                          if (i == _liveBids.length) {
                             return _bidCircle(
                               theme: theme,
                               borderColors: [theme.alternate, theme.alternate],
@@ -1068,7 +1252,7 @@ class _OrijaExploreState extends State<OrijaExplore> {
                               onTap: () => context.pushNamed('liveBiddingList'),
                             );
                           }
-                          final b = _liveBids[i - 1];
+                          final b = _liveBids[i];
                           final config =
                               (b['live_bid_config'] as Map?) ?? const {};
                           final listing = config['listings'] as Map?;
@@ -1085,12 +1269,33 @@ class _OrijaExploreState extends State<OrijaExplore> {
                             theme: theme,
                             borderColors: [theme.primary, theme.secondary],
                             fillColor: theme.alternate,
-                            child: ClipOval(
-                              child: (img ?? '').isEmpty
-                                  ? Icon(Icons.gavel_rounded,
-                                      color: theme.secondaryText, size: 22)
-                                  : Image.network(img!,
-                                      fit: BoxFit.cover, width: 64, height: 64),
+                            child: Stack(
+                              alignment: Alignment.bottomCenter,
+                              children: [
+                                ClipOval(
+                                  child: (img ?? '').isEmpty
+                                      ? Icon(Icons.gavel_rounded,
+                                          color: theme.secondaryText, size: 22)
+                                      : Image.network(img!,
+                                          fit: BoxFit.cover,
+                                          width: 64,
+                                          height: 64),
+                                ),
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 5, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFC0392B),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text('LIVE',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 8.5,
+                                          fontWeight: FontWeight.w800)),
+                                ),
+                              ],
                             ),
                             label: _naira(price),
                             onTap: () => context.pushNamed('bidDetailPage',
@@ -1099,70 +1304,6 @@ class _OrijaExploreState extends State<OrijaExplore> {
                         },
                       ),
                     ),
-                  ],
-
-                  // ------------------------------------------------------ Billboard
-                  // Part of this file (see _ExploreBillboard below): loads,
-                  // filters and tracks its own ads, renders nothing when none qualify.
-                  const _ExploreBillboard(),
-
-                  // ------------------------------------------------ Your school
-                  // Orija Campus: the community of the school you are linked to,
-                  // above Markets. Only shown to people who have a school.
-                  if (_mySchool != null) ...[
-                    _sectionHeader('Your school', theme),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: _marketCard(_mySchool!, theme,
-                          width: double.infinity, isSchool: true),
-                    ),
-                  ],
-
-                  // ------------------------------------------------------ Markets
-                  // Real, physical markets (Arena Oshodi, etc.) -- Orija's actual
-                  // wedge vs. generic online retail. A market with no vendors yet
-                  // still shows, tagged 'Rising' and sorted first. One market
-                  // fills the row; two share it evenly; three or more scroll
-                  // horizontally at a fixed card width.
-                  if (_markets.isNotEmpty) ...[
-                    _sectionHeader('Markets', theme,
-                        onSeeMore: () => context.pushNamed(
-                            'communitiesByInterest',
-                            queryParameters: {'communityType': 'market'})),
-                    if (_markets.length == 1)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: _marketCard(_markets[0], theme,
-                            width: double.infinity),
-                      )
-                    else if (_markets.length == 2)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            Expanded(
-                                child: _marketCard(_markets[0], theme,
-                                    width: double.infinity)),
-                            const SizedBox(width: 12),
-                            Expanded(
-                                child: _marketCard(_markets[1], theme,
-                                    width: double.infinity)),
-                          ],
-                        ),
-                      )
-                    else
-                      SizedBox(
-                        height: 152,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          itemCount: _markets.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(width: 12),
-                          itemBuilder: (context, i) =>
-                              _marketCard(_markets[i], theme),
-                        ),
-                      ),
                   ],
 
                   // ---------------------------------------------------- For You
@@ -1234,6 +1375,120 @@ class _OrijaExploreState extends State<OrijaExplore> {
                       ),
                     ),
                   ],
+
+                  // ------------------------------------------- Trending on campus
+                  // This week's most viewed, saved and bought items at the viewer's
+                  // school (get_explore_home.trending). Hidden when there are none.
+                  if (_trending.isNotEmpty) ...[
+                    _sectionHeader('Trending on campus', theme),
+                    SizedBox(
+                      height: 190,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: _trending.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 12),
+                        itemBuilder: (context, i) {
+                          final item = _trending[i];
+                          final store = (item['storefronts'] as Map?) ?? {};
+                          final photos =
+                              List<String>.from(item['photos'] as List? ?? []);
+                          final img = item['primary_image_url'] as String? ??
+                              (photos.isNotEmpty ? photos.first : null);
+                          return SizedBox(
+                            width: 130,
+                            child: InkWell(
+                              onTap: () => context.pushNamed(
+                                  'listingdetailPage',
+                                  queryParameters: {
+                                    'listingId': '${item['id']}'
+                                  }),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Stack(
+                                    children: [
+                                      _networkThumb(img, theme, size: 130),
+                                      Positioned(
+                                        top: 6,
+                                        left: 6,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 7, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: theme.primary,
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                          child: Text('#${i + 1}',
+                                              style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w800)),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        top: 6,
+                                        right: 6,
+                                        child: OrijaListingSaveButton(
+                                          listingId: '${item['id']}',
+                                          compact: true,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(item['title'] as String? ?? '',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          color: theme.primaryText,
+                                          fontSize: 12)),
+                                  Text(_naira(item['price'] as num?),
+                                      style: TextStyle(
+                                          color: theme.primary,
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w700)),
+                                  Text(store['name'] as String? ?? '',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          color: theme.secondaryText,
+                                          fontSize: 10.5)),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+
+                  // -------------------------------------------- Accommodation
+                  // Hostels at the viewer's school, right below the trade fair.
+                  if (_stays.isNotEmpty) _staysSection(theme),
+
+                  // ------------------------------------------------ Your school
+                  // Orija Campus: the community of the school you are linked to,
+                  // above Markets. Only shown to people who have a school.
+                  if (_mySchool != null) ...[
+                    _sectionHeader('Your school', theme,
+                        onSeeMore: () => context.pushNamed(
+                            'communitiesByInterest',
+                            queryParameters: {'typeFilter': 'institution'})),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _marketCard(_mySchool!, theme,
+                          width: double.infinity, isSchool: true),
+                    ),
+                  ],
+
+                  // ------------------------------------------------------ Billboard
+                  // Part of this file (see _ExploreBillboard below): loads,
+                  // filters and tracks its own ads, renders nothing when none qualify.
+                  const _ExploreBillboard(),
+
+                  // The trade fair is a floating bubble now (_FairBubble).
 
                   // ---------------------------------------------- Rising in your market
                   if (_rising.isNotEmpty) ...[
@@ -1726,17 +1981,19 @@ class _OrijaExploreState extends State<OrijaExplore> {
                     ),
                   ],
 
-                  // ------------------------------------------------------- From the Street
-                  if (_street.isNotEmpty) ...[
-                    _sectionHeader('From the Street', theme),
-                    for (final post in _street)
-                      OrijaPostCard(
-                        key: ValueKey(post['post_id']),
-                        post: post,
-                        initialLiked: _likedPostIds.contains(post['post_id']),
-                        initialSaved: _savedPostIds.contains(post['post_id']),
-                        initialRecommended:
-                            _recommendedPostIds.contains(post['post_id']),
+                  // ------------------------------------------------ More for you
+                  if (_more.isNotEmpty) ...[
+                    _sectionHeader('More for you', theme),
+                    _moreGrid(theme),
+                    if (_moreLoading)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Center(
+                            child: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2))),
                       ),
                   ],
 
@@ -2291,5 +2548,350 @@ class _ExploreBillboardState extends State<_ExploreBillboard> {
         ),
       ),
     );
+  }
+}
+
+/// The trade fair as a small floating bubble (design 12.1–12.4).
+///
+/// Docked to a screen edge, it shows the booking countdown with a ring that
+/// fills as time runs out. Drag it anywhere: let go and it snaps to the
+/// nearest side (the spot is remembered). Drop it on the × that appears at the
+/// bottom to hide it until tomorrow. Tap: the full trade fair card pops up.
+/// On the last day it counts hours, turns red-orange and pulses.
+class _FairBubble extends StatefulWidget {
+  const _FairBubble({super.key, required this.fair});
+  final Map<String, dynamic> fair;
+
+  @override
+  State<_FairBubble> createState() => _FairBubbleState();
+}
+
+class _FairBubbleState extends State<_FairBubble>
+    with SingleTickerProviderStateMixin {
+  static const _size = 64.0;
+  static const _posKey = 'orija_fair_bubble_pos';
+  static const _hideKey = 'orija_fair_bubble_hidden_on';
+
+  bool _ready = false;
+  bool _hidden = false;
+  bool _left = false; // docked side
+  double _yFrac = 0.42; // vertical position, 0 (top) .. 1 (bottom)
+  Offset? _drag; // while dragging: the bubble's top-left
+  bool _overBin = false;
+  Timer? _tick;
+  late final AnimationController _pulse = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 1600));
+
+  DateTime? get _closes =>
+      DateTime.tryParse('${widget.fair['booking_closes_at'] ?? ''}')?.toLocal();
+
+  String _today() {
+    final d = DateTime.now();
+    return '${d.year}-${d.month}-${d.day}';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _restore();
+    // Minutes are enough for the bubble; the card itself shows seconds.
+    _tick = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  Future<void> _restore() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      _hidden = p.getString(_hideKey) == _today();
+      final pos = p.getString(_posKey);
+      if (pos != null && pos.contains(':')) {
+        final parts = pos.split(':');
+        _left = parts[0] == 'L';
+        _yFrac = (double.tryParse(parts[1]) ?? _yFrac).clamp(0.0, 1.0);
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _ready = true);
+  }
+
+  Future<void> _save() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(
+          _posKey, '${_left ? 'L' : 'R'}:${_yFrac.toStringAsFixed(3)}');
+    } catch (_) {}
+  }
+
+  Future<void> _hideToday() async {
+    HapticFeedback.mediumImpact();
+    setState(() => _hidden = true);
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_hideKey, _today());
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Trade fair hidden until tomorrow.')),
+      );
+    }
+  }
+
+  void _open() {
+    HapticFeedback.lightImpact();
+    final community = '${widget.fair['community_id'] ?? ''}';
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Close',
+      barrierColor: const Color(0x8C14181B),
+      transitionDuration: const Duration(milliseconds: 380),
+      pageBuilder: (ctx, a, b) => SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Material(
+              type: MaterialType.transparency,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Stack(children: [
+                  OrijaTradeFairCard(
+                      communityId: community.isEmpty ? null : community),
+                  Positioned(
+                    right: 24,
+                    top: 22,
+                    child: GestureDetector(
+                      onTap: () => Navigator.of(ctx).pop(),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: const BoxDecoration(
+                            color: Color(0x29FFF5EE), shape: BoxShape.circle),
+                        child: const Icon(Icons.close_rounded,
+                            color: Color(0xFFFFF5EE), size: 18),
+                      ),
+                    ),
+                  ),
+                ]),
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    _hideToday();
+                  },
+                  child: const Text('Hide the bubble until tomorrow',
+                      style: TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w600)),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+      transitionBuilder: (ctx, a, b, child) {
+        final c = CurvedAnimation(
+            parent: a,
+            curve: Curves.easeOutBack,
+            reverseCurve: Curves.easeInCubic);
+        return FadeTransition(
+          opacity: CurvedAnimation(parent: a, curve: Curves.easeOut),
+          child: ScaleTransition(
+            scale: Tween(begin: 0.2, end: 1.0).animate(c),
+            alignment: Alignment(
+                _left ? -0.9 : 0.9, (_yFrac * 2 - 1).clamp(-1.0, 1.0)),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final closes = _closes;
+    if (!_ready || _hidden || closes == null) return const SizedBox.shrink();
+    final left = closes.difference(DateTime.now());
+    if (left.isNegative) return const SizedBox.shrink();
+    final lastDay = left.inHours < 24;
+    if (lastDay && !_pulse.isAnimating) _pulse.repeat();
+    if (!lastDay && _pulse.isAnimating) _pulse.stop();
+
+    final big = lastDay
+        ? '${left.inHours.toString().padLeft(2, '0')}:${(left.inMinutes % 60).toString().padLeft(2, '0')}'
+        : '${left.inDays}';
+    final small = lastDay ? 'HRS LEFT' : (left.inDays == 1 ? 'DAY' : 'DAYS');
+    // Ring: how much of the last 30 days of booking has run out.
+    final ring = (1 - left.inMinutes / (30 * 24 * 60)).clamp(0.04, 1.0);
+
+    return LayoutBuilder(builder: (context, box) {
+      final pad = MediaQuery.paddingOf(context);
+      final top = pad.top + 70.0;
+      // Stay clear of the floating nav bar and the + Create button below.
+      final bottom = box.maxHeight - 168 - pad.bottom - _size;
+      final span = bottom > top ? bottom - top : 0.0;
+      final y = top + span * _yFrac;
+      final docked = Offset(_left ? 10 : box.maxWidth - _size - 10, y);
+      final pos = _drag ?? docked;
+      final binCenter =
+          Offset(box.maxWidth / 2, box.maxHeight - 100 - pad.bottom - 10);
+
+      final bubble = GestureDetector(
+        onTap: _open,
+        onPanStart: (_) {
+          HapticFeedback.selectionClick();
+          setState(() => _drag = docked);
+        },
+        onPanUpdate: (d) {
+          final next = (_drag ?? docked) + d.delta;
+          final center = next + const Offset(_size / 2, _size / 2);
+          final over = (center - binCenter).distance < 56;
+          if (over && !_overBin) HapticFeedback.lightImpact();
+          setState(() {
+            _drag = next;
+            _overBin = over;
+          });
+        },
+        onPanEnd: (_) {
+          final p = _drag ?? docked;
+          if (_overBin) {
+            setState(() {
+              _drag = null;
+              _overBin = false;
+            });
+            _hideToday();
+            return;
+          }
+          setState(() {
+            _left = p.dx + _size / 2 < box.maxWidth / 2;
+            _yFrac = span > 0 ? ((p.dy - top) / span).clamp(0.0, 1.0) : 0.5;
+            _drag = null;
+          });
+          _save();
+        },
+        child: Semantics(
+          button: true,
+          label: '${widget.fair['name'] ?? 'Trade fair'}: booking closes in '
+              '${lastDay ? '${left.inHours} hours' : '${left.inDays} days'}. Open',
+          child: AnimatedScale(
+            scale: _drag != null ? 1.12 : 1,
+            duration: const Duration(milliseconds: 160),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              AnimatedBuilder(
+                animation: _pulse,
+                builder: (_, child) => Container(
+                  width: _size,
+                  height: _size,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: lastDay
+                          ? const [Color(0xFFC0392B), Color(0xFFFE6601)]
+                          : const [Color(0xFF86370E), Color(0xFFB24E1C)],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0x5986370E),
+                        blurRadius: _drag != null ? 30 : 18,
+                        offset: Offset(0, _drag != null ? 14 : 7),
+                      ),
+                      if (lastDay)
+                        BoxShadow(
+                          color: const Color(0xFFFE6601)
+                              .withValues(alpha: .45 * (1 - _pulse.value)),
+                          spreadRadius: 14 * _pulse.value,
+                        ),
+                    ],
+                  ),
+                  child: child,
+                ),
+                child: Stack(alignment: Alignment.center, children: [
+                  SizedBox(
+                    width: _size - 6,
+                    height: _size - 6,
+                    child: CircularProgressIndicator(
+                      value: ring.toDouble(),
+                      strokeWidth: 3,
+                      color: const Color(0xFFFFF5EE),
+                      backgroundColor: const Color(0x38FFF5EE),
+                    ),
+                  ),
+                  Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(big,
+                        style: TextStyle(
+                            color: const Color(0xFFFFF5EE),
+                            fontSize: lastDay ? 15 : 20,
+                            height: 1.05,
+                            fontWeight: FontWeight.w800)),
+                    Text(small,
+                        style: const TextStyle(
+                            color: Color(0xD9FFF5EE),
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w700)),
+                  ]),
+                ]),
+              ),
+              Transform.translate(
+                offset: const Offset(0, -9),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border:
+                        Border.all(color: const Color(0xFF86370E), width: 1.4),
+                  ),
+                  child: Text(lastDay ? 'Last day' : 'Trade fair',
+                      style: const TextStyle(
+                          color: Color(0xFF86370E),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800)),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      );
+
+      return Stack(children: [
+        // Drop target, only while dragging.
+        if (_drag != null)
+          Positioned(
+            left: binCenter.dx - 28,
+            top: binCenter.dy - 28,
+            child: AnimatedScale(
+              scale: _overBin ? 1.25 : 1,
+              duration: const Duration(milliseconds: 140),
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: _overBin
+                      ? const Color(0xFFC0392B)
+                      : const Color(0xBF14181B),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white70, width: 2),
+                ),
+                child: const Icon(Icons.close_rounded,
+                    color: Colors.white, size: 26),
+              ),
+            ),
+          ),
+        AnimatedPositioned(
+          duration:
+              _drag != null ? Duration.zero : const Duration(milliseconds: 320),
+          curve: Curves.easeOutBack,
+          left: pos.dx,
+          top: pos.dy,
+          child: bubble,
+        ),
+      ]);
+    });
   }
 }

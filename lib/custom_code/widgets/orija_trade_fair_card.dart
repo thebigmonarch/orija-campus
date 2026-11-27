@@ -356,8 +356,11 @@ class _OrijaTradeFairCardState extends State<OrijaTradeFairCard> {
     final progress =
         total == 0 ? 0.0 : (booked / total).clamp(0.0, 1.0).toDouble();
     final tile = _tile(f);
+    // Sponsors are shown as logos only: one without a logo is skipped, and
+    // the "Supported by" row hides when no sponsor has a logo.
     final sponsors = (f['sponsors'] is List ? f['sponsors'] as List : const [])
         .whereType<Map>()
+        .where((sp) => _has(sp['logo_url']))
         .toList();
     final school = '${f['school_name'] ?? ''}';
     final waitlisted = _waitlisted.contains(id);
@@ -579,28 +582,35 @@ class _OrijaTradeFairCardState extends State<OrijaTradeFairCard> {
     );
   }
 
+  static bool _has(dynamic v) =>
+      v != null && '$v'.trim().isNotEmpty && '$v' != 'null';
+
+  // A sponsor's logo on a white tile (a logo that fails to load is hidden).
   Widget _sponsor(Map s) {
-    final logo = '${s['logo_url'] ?? ''}';
-    final name = '${s['name'] ?? ''}';
-    return Container(
-      height: 24,
-      constraints: const BoxConstraints(minWidth: 48),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      alignment: Alignment.center,
-      decoration:
-          BoxDecoration(color: _cream, borderRadius: BorderRadius.circular(8)),
-      child: logo.isNotEmpty && logo != 'null'
-          ? Image.network(logo,
-              height: 18,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => Text(name,
-                  style: const TextStyle(
-                      color: _brown,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600)))
-          : Text(name,
-              style: const TextStyle(
-                  color: _brown, fontSize: 12, fontWeight: FontWeight.w600)),
+    final logo = _has(s['logo_url']) ? '${s['logo_url']}' : '';
+    final name = _has(s['name']) ? '${s['name']}' : '';
+    return Semantics(
+      label: name.isEmpty ? 'Sponsor' : 'Sponsor: $name',
+      child: Container(
+        height: 34,
+        constraints: const BoxConstraints(minWidth: 56, maxWidth: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(9),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x2E000000), blurRadius: 3, offset: Offset(0, 1))
+          ],
+        ),
+        child: logo.isNotEmpty
+            ? Image.network(logo,
+                height: 24,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink())
+            : const SizedBox.shrink(),
+      ),
     );
   }
 }

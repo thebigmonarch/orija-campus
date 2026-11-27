@@ -395,13 +395,14 @@ class _OrijaMyOjaCardState extends State<OrijaMyOjaCard> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          // The pill is white in both modes, so its text is fixed dark.
                           Text('Dashboard',
                               style: TextStyle(
-                                  color: t.primaryText,
+                                  color: const Color(0xFF14181B),
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w700)),
-                          Icon(Icons.chevron_right_rounded,
-                              size: 16, color: t.primaryText),
+                          const Icon(Icons.chevron_right_rounded,
+                              size: 16, color: Color(0xFF14181B)),
                         ],
                       ),
                     ),

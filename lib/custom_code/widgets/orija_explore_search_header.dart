@@ -533,34 +533,8 @@ class _OrijaExploreSearchHeaderState extends State<OrijaExploreSearchHeader> {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                onPressed: () => context.pushNamed('AskCommunity'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 30),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  backgroundColor: theme.primaryBackground,
-                  side: BorderSide(color: theme.secondary, width: 2),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-                child: Text('Ask?',
-                    style: TextStyle(color: theme.primaryText, fontSize: 12)),
-              ),
-              const SizedBox(width: 6),
-              OutlinedButton(
-                onPressed: () => context.pushNamed('SellPage'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 30),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  backgroundColor: theme.primaryBackground,
-                  side: BorderSide(color: theme.secondary, width: 2),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-                child: Text('Sell?',
-                    style: TextStyle(color: theme.primaryText, fontSize: 12)),
-              ),
+              // Ask and Sell live in the + Create button now, so search
+              // takes the full width.
             ],
           ),
           if (_showBagBanner && !hasQuery) _bagBanner(theme),

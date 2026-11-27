@@ -71,7 +71,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
 
                         return Container(
                           width: double.infinity,
-                          height: MediaQuery.sizeOf(context).height * 0.9,
+                          height: MediaQuery.sizeOf(context).height * 1.0,
                           child: Stack(
                             children: [
                               Padding(
@@ -114,6 +114,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
                                                     .height *
                                                 1.0,
                                             imageUrl: imageListItem,
+                                            fullView: true,
                                           ),
                                         ),
                                       ],

@@ -104,6 +104,7 @@ class OrijaCreateFab extends StatefulWidget {
 }
 
 const _brown = Color(0xFF86370E);
+const _brown2 = Color(0xFFC2581F);
 
 class _OrijaCreateFabState extends State<OrijaCreateFab> {
   final _key = GlobalKey();
@@ -198,11 +199,8 @@ class _OrijaCreateFabState extends State<OrijaCreateFab> {
   }
 
   Widget _button(bool collapsed) {
-    // White with a brown border and brown + / label; in dark mode a dark
-    // surface with a lighter brown, so it doesn't glare on a black screen.
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final fill = dark ? const Color(0xFF1B1F24) : Colors.white;
-    final ink = dark ? const Color(0xFFE08A5A) : _brown;
+    // Brown gradient with a cream + and label (same in light and dark mode).
+    const ink = Color(0xFFFFF5EE);
     return Semantics(
       button: true,
       label: 'Create: sell, ask or quick sell',
@@ -222,16 +220,20 @@ class _OrijaCreateFabState extends State<OrijaCreateFab> {
             height: 54,
             width: collapsed ? 54 : 132,
             decoration: BoxDecoration(
-              color: fill,
+              gradient: const LinearGradient(
+                  colors: [_brown, _brown2],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight),
               borderRadius: BorderRadius.circular(27),
-              border: Border.all(color: ink, width: 1.6),
-              boxShadow: [
+              boxShadow: const [
                 BoxShadow(
-                    color: dark
-                        ? const Color(0x66000000)
-                        : const Color(0x3386370E),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6)),
+                    color: Color(0x5E86370E),
+                    blurRadius: 20,
+                    offset: Offset(0, 8)),
+                BoxShadow(
+                    color: Color(0x1F000000),
+                    blurRadius: 4,
+                    offset: Offset(0, 2)),
               ],
             ),
             child: ClipRRect(
@@ -386,13 +388,13 @@ class _CreateMenu extends StatelessWidget {
               builder: (_, __) {
                 final t = Curves.easeOutBack
                     .transform(animation.value.clamp(0.0, 1.0));
-                // Starts as the white (dark: dark-grey) button, ends dark (dark: light).
+                // Starts as the brown button, ends dark (dark mode: light).
                 final c = Color.lerp(
-                    dark ? const Color(0xFF1B1F24) : Colors.white,
+                    _brown,
                     dark ? const Color(0xFFF1F4F8) : const Color(0xFF14181B),
                     Curves.easeOut.transform(animation.value))!;
                 final ic = Color.lerp(
-                    dark ? const Color(0xFFE08A5A) : _brown,
+                    const Color(0xFFFFF5EE),
                     dark ? const Color(0xFF14181B) : Colors.white,
                     animation.value)!;
                 return GestureDetector(

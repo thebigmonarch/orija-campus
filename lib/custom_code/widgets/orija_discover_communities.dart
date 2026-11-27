@@ -62,6 +62,7 @@ class OrijaDiscoverCommunities extends StatefulWidget {
     this.width,
     this.height,
     this.category,
+    this.communityType,
   });
 
   final double? width;
@@ -69,6 +70,9 @@ class OrijaDiscoverCommunities extends StatefulWidget {
 
   /// Optional category slug to start filtered on.
   final String? category;
+
+  /// Opens on this type's chip: 'market', 'community' or 'institution'.
+  final String? communityType;
 
   @override
   State<OrijaDiscoverCommunities> createState() =>
@@ -119,9 +123,15 @@ class _OrijaDiscoverCommunitiesState extends State<OrijaDiscoverCommunities> {
     // more) -- read straight off the route's query params rather than a
     // constructor field, since the generated page wrapper doesn't forward
     // its own declared 'communityType' page param through to this widget.
-    final t =
-        (GoRouterState.of(context).uri.queryParameters['communityType'] ?? '')
+    // The page passes communityType; the route's query string is a fallback.
+    var t = (widget.communityType ?? '').trim();
+    if (!_validTypes.contains(t)) {
+      try {
+        t = (GoRouterState.of(context).uri.queryParameters['communityType'] ??
+                '')
             .trim();
+      } catch (_) {}
+    }
     if (_validTypes.contains(t)) _type = t;
     _scroll.addListener(() {
       if (_scroll.hasClients &&

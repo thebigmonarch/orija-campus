@@ -1108,16 +1108,19 @@ class _OrijaTradeFairBookingState extends State<OrijaTradeFairBooking> {
         Expanded(
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Table $_notice was just booked', style: t.titleSmall),
+            // Fixed peach banner: fixed dark text, readable in dark mode too.
+            Text('Table $_notice was just booked',
+                style: t.titleSmall.override(color: const Color(0xFF14181B))),
             const SizedBox(height: 4),
             Text(
                 'Someone got it a moment before you. You haven\'t been charged.${free.isNotEmpty ? ' $free are still free.' : ''}',
-                style: t.bodyMedium),
+                style: t.bodyMedium.override(color: const Color(0xFF57636C))),
           ]),
         ),
         InkWell(
             onTap: () => setState(() => _notice = null),
-            child: Icon(Icons.close_rounded, size: 18, color: t.secondaryText)),
+            child: const Icon(Icons.close_rounded,
+                size: 18, color: Color(0xFF57636C))),
       ]),
     );
   }

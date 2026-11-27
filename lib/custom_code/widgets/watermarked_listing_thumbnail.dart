@@ -22,11 +22,16 @@ class WatermarkedListingThumbnail extends StatelessWidget {
     this.width,
     this.height,
     this.imageUrl,
+    this.fullView = false,
   });
 
   final double? width;
   final double? height;
   final String? imageUrl;
+
+  /// The image viewer: show the whole photo, centred, instead of filling and
+  /// cropping the box like a thumbnail.
+  final bool fullView;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +44,8 @@ class WatermarkedListingThumbnail extends StatelessWidget {
       imageUrl: withListingWatermark(raw) ?? raw,
       width: width,
       height: height,
-      fit: BoxFit.cover,
+      fit: fullView ? BoxFit.contain : BoxFit.cover,
+      alignment: Alignment.center,
     );
   }
 }

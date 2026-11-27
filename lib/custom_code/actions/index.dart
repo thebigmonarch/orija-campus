@@ -32,3 +32,4 @@ export '/custom_code/actions/cancel_storefront_plan.dart'
     show cancelStorefrontPlan;
 export '/custom_code/actions/guard_onboarding.dart' show guardOnboarding;
 export '/custom_code/actions/share_referral_link.dart' show shareReferralLink;
+export '/custom_code/actions/default_dark_mode.dart' show defaultDarkMode;
